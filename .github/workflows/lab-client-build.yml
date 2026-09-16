@@ -302,6 +302,16 @@ jobs:
 
           ./build.py --flutter --hwcodec --unix-file-copy-paste --screencapturekit
 
+      - name: Re-sign app bundle as one unit
+        run: |
+          # `flutter build macos` leaves each embedded framework ad-hoc-signed
+          # separately from the main executable, which carries the hardened
+          # runtime flag. Under library validation that reads as "different
+          # Team IDs" even though both say "not set", and dyld refuses to load
+          # FlutterMacOS.framework at launch. Re-signing the whole bundle in one
+          # pass gives every binary the same ad-hoc identity and fixes it.
+          codesign --force --deep --sign - ./flutter/build/macos/Build/Products/Release/LabDesk.app
+
       - name: Create unsigned DMG
         run: |
           CREATE_DMG="$(command -v create-dmg)"

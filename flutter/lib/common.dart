@@ -9,6 +9,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/formatter/id_formatter.dart';
+import 'package:flutter_hbb/desktop/pages/lab_api_service.dart';
 import 'package:flutter_hbb/desktop/widgets/refresh_wrapper.dart';
 import 'package:flutter_hbb/desktop/widgets/tabbar_widget.dart';
 import 'package:flutter_hbb/main.dart';
@@ -3040,6 +3041,11 @@ String getWindowName({WindowType? overrideType}) {
 }
 
 String getWindowNameWithId(String id, {WindowType? overrideType}) {
+  // The lab client must never surface the host's id/IP anywhere a student can see it,
+  // including the OS window title, taskbar, dock, or Mission Control/Alt-Tab previews.
+  if (LabConfig.isLabMode) {
+    return getWindowName(overrideType: overrideType);
+  }
   return "${DesktopTab.tablabelGetter(id).value} - ${getWindowName(overrideType: overrideType)}";
 }
 

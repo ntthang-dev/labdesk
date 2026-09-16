@@ -103,9 +103,12 @@ class _LoginGatePageState extends State<LoginGatePage> {
           _activeSessionToken = null;
         }
         if (mounted) {
+          // Never interpolate `e` into a student-facing message: exceptions like
+          // SocketException embed the target host/IP in their toString().
           setState(() {
             _isLoading = false;
-            _errorMessage = 'Lỗi kết nối máy trạm: $e';
+            _errorMessage =
+                'Không thể kết nối tới máy phòng lab. Vui lòng thử lại hoặc liên hệ Quản trị viên.';
           });
         }
       }
