@@ -6,6 +6,9 @@ void main() {
   group('LabConfig Tests', () {
     test('Defaults and compile-time constants are handled safely', () {
       expect(LabConfig.isLabMode, isTrue);
+      expect(LabConfig.machineRustdeskId, equals('100.83.83.70'));
+      expect(LabConfig.machinePassword, equals('mat_khau_may_lab'));
+      expect(LabConfig.sharedSecret, equals('your-secret-key-here'));
     });
 
     test('saveLocalConfig and loadLocalConfig persist and override properties', () {

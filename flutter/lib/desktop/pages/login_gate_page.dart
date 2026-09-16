@@ -26,7 +26,7 @@ class _LoginGatePageState extends State<LoginGatePage> {
   bool _isLoading = false;
   String? _errorMessage;
   String? _activeSessionToken;
-  String? _connectedMachineId;
+  String? _connectedMachineName;
   Timer? _pollTimer;
 
   @override
@@ -48,7 +48,7 @@ class _LoginGatePageState extends State<LoginGatePage> {
 
     if (!LabConfig.isConfigured) {
       setState(() {
-        _errorMessage = 'Chưa cấu hình Google Sheets API. Bấm nút cài đặt ⚙️ góc phải để nhập.';
+        _errorMessage = 'Hệ thống phòng lab đang bận hoặc chưa sẵn sàng. Vui lòng liên hệ Quản trị viên.';
       });
       return;
     }
@@ -78,12 +78,12 @@ class _LoginGatePageState extends State<LoginGatePage> {
       if (machineId.isEmpty) {
         setState(() {
           _isLoading = false;
-          _errorMessage = 'Chưa có Machine ID / IP của máy lab';
+          _errorMessage = 'Chưa có thông tin máy trạm được chỉ định';
         });
         return;
       }
 
-      _connectedMachineId = machineId;
+      _connectedMachineName = result.machineName ?? 'Máy phòng Lab';
 
       try {
         if (widget.connectHandler != null) {
@@ -135,7 +135,7 @@ class _LoginGatePageState extends State<LoginGatePage> {
       if (mounted) {
         setState(() {
           _activeSessionToken = null;
-          _connectedMachineId = null;
+          _connectedMachineName = null;
         });
       }
       return;
@@ -148,7 +148,7 @@ class _LoginGatePageState extends State<LoginGatePage> {
     if (status == SessionStatus.kicked || status == SessionStatus.expired) {
       _pollTimer?.cancel();
       _activeSessionToken = null;
-      _connectedMachineId = null;
+      _connectedMachineName = null;
 
       if (widget.connectHandler == null) {
         await rustDeskWinManager.closeAllSubWindows();
@@ -164,7 +164,7 @@ class _LoginGatePageState extends State<LoginGatePage> {
     } else if (status == SessionStatus.notFound) {
       _pollTimer?.cancel();
       _activeSessionToken = null;
-      _connectedMachineId = null;
+      _connectedMachineName = null;
       if (widget.connectHandler == null) {
         await rustDeskWinManager.closeAllSubWindows();
       }
@@ -190,206 +190,10 @@ class _LoginGatePageState extends State<LoginGatePage> {
     if (mounted) {
       setState(() {
         _activeSessionToken = null;
-        _connectedMachineId = null;
+        _connectedMachineName = null;
         _isLoading = false;
       });
     }
-  }
-
-  void _showConfigDialog() {
-    final urlCtrl = TextEditingController(text: LabConfig.apiUrl);
-    final secretCtrl = TextEditingController(text: LabConfig.sharedSecret);
-    final machineCtrl = TextEditingController(
-      text: LabConfig.machineRustdeskId.isNotEmpty
-          ? LabConfig.machineRustdeskId
-          : '100.83.83.70',
-    );
-    final passCtrl = TextEditingController(
-      text: LabConfig.machinePassword.isNotEmpty
-          ? LabConfig.machinePassword
-          : 'mat_khau_may_lab',
-    );
-
-    String? testResult;
-    bool isTesting = false;
-    bool isTestSuccess = false;
-
-    showDialog(
-      context: context,
-      builder: (ctx) {
-        return StatefulBuilder(
-          builder: (dialogCtx, setDialogState) {
-            final isDark = Theme.of(dialogCtx).brightness == Brightness.dark;
-            return AlertDialog(
-              backgroundColor:
-                  isDark ? const Color(0xFF24252B) : Colors.white,
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(16),
-              ),
-              title: const Row(
-                children: [
-                  Icon(Icons.tune, color: Colors.blueAccent),
-                  SizedBox(width: 10),
-                  Text('Cấu hình Google Sheets & Máy Lab',
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold)),
-                ],
-              ),
-              content: SizedBox(
-                width: 480,
-                child: SingleChildScrollView(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      const Text(
-                        'Nhập thông tin kết nối từ Google Apps Script Web App và máy lab:',
-                        style: TextStyle(fontSize: 13, color: Colors.grey),
-                      ),
-                      const SizedBox(height: 16),
-                      TextField(
-                        controller: urlCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Google Apps Script Web App URL',
-                          hintText: 'https://script.google.com/macros/s/.../exec',
-                          prefixIcon: Icon(Icons.link),
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: secretCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Shared Secret Key',
-                          hintText: 'your-secret-key-here',
-                          prefixIcon: Icon(Icons.key),
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: machineCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Machine ID / IP Tailscale',
-                          hintText: '100.83.83.70',
-                          prefixIcon: Icon(Icons.computer),
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      TextField(
-                        controller: passCtrl,
-                        decoration: const InputDecoration(
-                          labelText: 'Permanent Password máy Lab',
-                          hintText: 'mat_khau_may_lab',
-                          prefixIcon: Icon(Icons.lock_outline),
-                          border: OutlineInputBorder(),
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-
-                      // Test result display
-                      if (testResult != null)
-                        Container(
-                          width: double.infinity,
-                          padding: const EdgeInsets.all(10),
-                          margin: const EdgeInsets.only(bottom: 12),
-                          decoration: BoxDecoration(
-                            color: isTestSuccess
-                                ? const Color(0x1A4CAF50)
-                                : const Color(0x1AE53935),
-                            borderRadius: BorderRadius.circular(8),
-                            border: Border.all(
-                              color: isTestSuccess
-                                  ? Colors.green
-                                  : Colors.redAccent,
-                            ),
-                          ),
-                          child: Row(
-                            children: [
-                              Icon(
-                                isTestSuccess
-                                    ? Icons.check_circle
-                                    : Icons.error_outline,
-                                color: isTestSuccess ? Colors.green : Colors.red,
-                                size: 18,
-                              ),
-                              const SizedBox(width: 8),
-                              Expanded(
-                                child: Text(
-                                  testResult!,
-                                  style: TextStyle(
-                                    color:
-                                        isTestSuccess ? Colors.green : Colors.red,
-                                    fontSize: 12,
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-
-                      // Ping Test Button
-                      OutlinedButton.icon(
-                        onPressed: isTesting
-                            ? null
-                            : () async {
-                                setDialogState(() {
-                                  isTesting = true;
-                                  testResult = null;
-                                });
-                                final res = await LabApiService.instance
-                                    .testConnection(
-                                        urlCtrl.text.trim(), secretCtrl.text.trim());
-                                setDialogState(() {
-                                  isTesting = false;
-                                  isTestSuccess = res['success'] == true;
-                                  testResult = res['message'] as String?;
-                                });
-                              },
-                        icon: isTesting
-                            ? const SizedBox(
-                                width: 16,
-                                height: 16,
-                                child: CircularProgressIndicator(strokeWidth: 2))
-                            : const Icon(Icons.wifi_tethering, size: 18),
-                        label: const Text('Kiểm tra kết nối API Google Sheets'),
-                      ),
-                    ],
-                  ),
-                ),
-              ),
-              actions: [
-                TextButton(
-                  onPressed: () => Navigator.of(dialogCtx).pop(),
-                  child: const Text('Hủy'),
-                ),
-                ElevatedButton(
-                  onPressed: () {
-                    LabConfig.saveLocalConfig(
-                      apiUrl: urlCtrl.text.trim(),
-                      sharedSecret: secretCtrl.text.trim(),
-                      machineId: machineCtrl.text.trim(),
-                      machinePassword: passCtrl.text.trim(),
-                    );
-                    Navigator.of(dialogCtx).pop();
-                    setState(() {
-                      _errorMessage = null;
-                    });
-                    ScaffoldMessenger.of(context).showSnackBar(
-                      const SnackBar(
-                        content: Text('Đã lưu cấu hình LabDesk thành công!'),
-                        backgroundColor: Colors.green,
-                      ),
-                    );
-                  },
-                  child: const Text('Lưu cấu hình'),
-                ),
-              ],
-            );
-          },
-        );
-      },
-    );
   }
 
   @override
@@ -438,7 +242,7 @@ class _LoginGatePageState extends State<LoginGatePage> {
         ),
         const SizedBox(height: 8),
         Text(
-          'Máy lab: $_connectedMachineId',
+          'Máy: ${_connectedMachineName ?? "Máy phòng Lab"}',
           style: TextStyle(
             fontSize: 14,
             color: isDark ? Colors.white70 : Colors.black87,
@@ -510,27 +314,18 @@ class _LoginGatePageState extends State<LoginGatePage> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          // Header with Settings Gear
-          Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            children: [
-              const SizedBox(width: 40),
-              Image.asset(
-                'res/icon.png',
-                width: 64,
-                height: 64,
-                errorBuilder: (_, __, ___) => Icon(
-                  Icons.computer,
-                  size: 56,
-                  color: Theme.of(context).colorScheme.primary,
-                ),
+          // Header Logo (Centered, no settings icon)
+          Center(
+            child: Image.asset(
+              'res/icon.png',
+              width: 64,
+              height: 64,
+              errorBuilder: (_, __, ___) => Icon(
+                Icons.computer,
+                size: 56,
+                color: Theme.of(context).colorScheme.primary,
               ),
-              IconButton(
-                icon: const Icon(Icons.settings_outlined),
-                tooltip: 'Cấu hình Google Sheets & Lab',
-                onPressed: _showConfigDialog,
-              ),
-            ],
+            ),
           ),
           const SizedBox(height: 12),
           Text(
@@ -550,42 +345,7 @@ class _LoginGatePageState extends State<LoginGatePage> {
               color: isDark ? Colors.white60 : Colors.black54,
             ),
           ),
-          const SizedBox(height: 20),
-
-          // Alert banner if not configured
-          if (!LabConfig.isConfigured)
-            InkWell(
-              onTap: _showConfigDialog,
-              borderRadius: BorderRadius.circular(10),
-              child: Container(
-                padding: const EdgeInsets.all(12),
-                margin: const EdgeInsets.only(bottom: 20),
-                decoration: BoxDecoration(
-                  color: Colors.amber.withOpacity(0.12),
-                  borderRadius: BorderRadius.circular(10),
-                  border: Border.all(color: Colors.amber.shade700),
-                ),
-                child: Row(
-                  children: [
-                    Icon(Icons.warning_amber_rounded,
-                        color: Colors.amber.shade800, size: 22),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        'Chưa cấu hình Google Sheets API.\nBấm vào đây để nhập URL Apps Script.',
-                        style: TextStyle(
-                          color: isDark ? Colors.amber.shade200 : Colors.amber.shade900,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                    Icon(Icons.arrow_forward_ios,
-                        size: 14, color: Colors.amber.shade800),
-                  ],
-                ),
-              ),
-            ),
+          const SizedBox(height: 24),
 
           // Full Name field
           TextFormField(

@@ -8,11 +8,11 @@ class LabConfig {
   static const String _envApiUrl =
       String.fromEnvironment('LAB_API_URL', defaultValue: '');
   static const String _envSharedSecret =
-      String.fromEnvironment('LAB_SHARED_SECRET', defaultValue: '');
+      String.fromEnvironment('LAB_SHARED_SECRET', defaultValue: 'your-secret-key-here');
   static const String _envMachineId =
-      String.fromEnvironment('LAB_MACHINE_ID', defaultValue: '');
+      String.fromEnvironment('LAB_MACHINE_ID', defaultValue: '100.83.83.70');
   static const String _envMachinePassword =
-      String.fromEnvironment('LAB_MACHINE_PASSWORD', defaultValue: '');
+      String.fromEnvironment('LAB_MACHINE_PASSWORD', defaultValue: 'mat_khau_may_lab');
 
   static String? _overrideApiUrl;
   static String? _overrideSharedSecret;
