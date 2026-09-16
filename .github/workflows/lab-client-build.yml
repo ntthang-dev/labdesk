@@ -32,8 +32,10 @@ on:
         required: false
         type: string
   push:
+    branches:
+      - master
     tags:
-      - "v*lab*"
+      - "v*"
 
 env:
   RUST_VERSION: "1.75"
