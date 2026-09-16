@@ -506,6 +506,10 @@ class RustDeskMultiWindowManager {
     }
   }
 
+  bool hasActiveRemoteDesktopWindows() {
+    return _remoteDesktopWindows.isNotEmpty;
+  }
+
   Set<int> getActiveWindows() {
     return _activeWindows;
   }

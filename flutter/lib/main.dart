@@ -8,6 +8,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/widgets/overlay.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
+import 'package:flutter_hbb/desktop/pages/lab_api_service.dart';
+import 'package:flutter_hbb/desktop/pages/lab_init.dart';
+import 'package:flutter_hbb/desktop/pages/login_gate_page.dart';
 import 'package:flutter_hbb/desktop/pages/install_page.dart';
 import 'package:flutter_hbb/desktop/pages/server_page.dart';
 import 'package:flutter_hbb/desktop/screen/desktop_file_transfer_screen.dart';
@@ -133,10 +136,11 @@ Future<void> initEnv(String appType) async {
 void runMainApp(bool startService) async {
   // register uni links
   await initEnv(kAppTypeMain);
+  await initLabMode();
   checkUpdate();
   // trigger connection status updater
   await bind.mainCheckConnectStatus();
-  if (startService) {
+  if (startService && !LabConfig.isLabMode) {
     gFFI.serverModel.startService();
   }
   await Future.wait([gFFI.abModel.loadCache(), gFFI.groupModel.loadCache()]);
@@ -502,7 +506,9 @@ class _AppState extends State<App> with WidgetsBindingObserver {
           darkTheme: MyTheme.darkTheme,
           themeMode: MyTheme.currentThemeMode(),
           home: isDesktop
-              ? const DesktopTabPage()
+              ? (LabConfig.isLabMode
+                  ? const LoginGatePage()
+                  : const DesktopTabPage())
               : isWeb
                   ? WebHomePage()
                   : HomePage(),

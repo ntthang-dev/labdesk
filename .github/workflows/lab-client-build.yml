@@ -1,0 +1,259 @@
+name: Build LabDesk Clients (Windows & macOS)
+
+on:
+  workflow_dispatch:
+    inputs:
+      api_url:
+        description: "Google Apps Script Web App URL"
+        required: false
+        type: string
+      shared_secret:
+        description: "Shared secret for Apps Script"
+        required: false
+        type: string
+      machine_id:
+        description: "Lab Machine RustDesk ID (optional if dynamic from Sheets)"
+        required: false
+        type: string
+      machine_password:
+        description: "Lab Machine Permanent Password (optional if dynamic from Sheets)"
+        required: false
+        type: string
+      rendezvous_server:
+        description: "Custom Rendezvous Server (e.g. 100.x.y.z on Tailscale)"
+        required: false
+        type: string
+      public_key:
+        description: "RustDesk Server Public Key (RS_PUB_KEY)"
+        required: false
+        type: string
+      relay_server:
+        description: "Custom Relay Server (optional)"
+        required: false
+        type: string
+  push:
+    tags:
+      - "v*lab*"
+
+env:
+  RUST_VERSION: "1.75"
+  SCITER_RUST_VERSION: "1.75"
+  FLUTTER_VERSION: "3.24.5"
+  LLVM_VERSION: "15.0.6"
+  VCPKG_COMMIT_ID: "9e593bb18ea69cc5095e012465dcd675a822ed0d"
+  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
+
+jobs:
+  build-windows-x64:
+    name: Build Windows x64 Lab Client
+    runs-on: windows-2022
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+        with:
+          submodules: recursive
+
+      - name: Export GitHub Actions cache environment variables
+        uses: actions/github-script@d7906e4ad0b1822421a7e6a35d5ca353c962f410 # v6
+        with:
+          script: |
+            core.exportVariable('ACTIONS_CACHE_URL', process.env['ACTIONS_CACHE_URL'] || '');
+            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env['ACTIONS_RUNTIME_TOKEN'] || '');
+
+      - name: Set up LLVM
+        uses: KyleMayes/install-llvm-action@v1
+        with:
+          version: ${{ env.LLVM_VERSION }}
+          directory: ${{ runner.temp }}/llvm
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@2783a3f08e1baf891508463f8c6653c258246225 # v2.12.0
+        with:
+          channel: "stable"
+          flutter-version: ${{ env.FLUTTER_VERSION }}
+          architecture: x64
+
+      - name: Replace engine with RustDesk custom flutter engine
+        run: |
+          flutter doctor -v
+          flutter precache --windows
+          Invoke-WebRequest -Uri https://github.com/rustdesk/engine/releases/download/main/windows-x64-release.zip -OutFile windows-x64-release.zip
+          Expand-Archive -Path windows-x64-release.zip -DestinationPath windows-x64-release
+          mv -Force windows-x64-release/* C:/hostedtoolcache/windows/flutter/stable-${{ env.FLUTTER_VERSION }}-x64/bin/cache/artifacts/engine/windows-x64-release/
+
+      - name: Patch flutter dropdown menu
+        shell: bash
+        run: |
+          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter)))
+          cd $(dirname $(dirname $(which flutter)))
+          git apply flutter_3.24.4_dropdown_menu_enableFilter.diff
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        with:
+          toolchain: ${{ env.SCITER_RUST_VERSION }}
+          targets: x86_64-pc-windows-msvc
+
+      - name: Setup Rust cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2
+        with:
+          prefix-key: windows-2022
+
+      - name: Setup vcpkg with Github Actions binary cache
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11
+        with:
+          vcpkgDirectory: C:\vcpkg
+          vcpkgGitCommitId: ${{ env.VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: Install vcpkg dependencies
+        env:
+          VCPKG_DEFAULT_HOST_TRIPLET: x64-windows-static
+        run: |
+          if ! $VCPKG_ROOT/vcpkg \
+            install \
+            --triplet x64-windows-static \
+            --x-install-root="$VCPKG_ROOT/installed"; then
+            find "${VCPKG_ROOT}/" -name "*.log" | while read -r _1; do
+              echo "$_1:"
+              echo "======"
+              cat "$_1"
+              echo "======"
+              echo ""
+            done
+            exit 1
+          fi
+        shell: bash
+
+      - name: Configure Lab Environment & Build
+        shell: bash
+        env:
+          INPUT_API_URL: ${{ inputs.api_url || secrets.LAB_API_URL }}
+          INPUT_SECRET: ${{ inputs.shared_secret || secrets.LAB_SHARED_SECRET }}
+          INPUT_MACHINE_ID: ${{ inputs.machine_id || secrets.LAB_MACHINE_ID }}
+          INPUT_MACHINE_PASSWORD: ${{ inputs.machine_password || secrets.LAB_MACHINE_PASSWORD }}
+          INPUT_RENDEZVOUS: ${{ inputs.rendezvous_server || secrets.LAB_RENDEZVOUS_SERVER }}
+          INPUT_PUB_KEY: ${{ inputs.public_key || secrets.LAB_RS_PUB_KEY }}
+          INPUT_RELAY: ${{ inputs.relay_server || secrets.LAB_RELAY_SERVER }}
+        run: |
+          # Construct Flutter define flags
+          DEFINES="--dart-define=LAB_MODE=true"
+          if [ -n "$INPUT_API_URL" ]; then
+            DEFINES="$DEFINES --dart-define=LAB_API_URL=$INPUT_API_URL"
+          fi
+          if [ -n "$INPUT_SECRET" ]; then
+            DEFINES="$DEFINES --dart-define=LAB_SHARED_SECRET=$INPUT_SECRET"
+          fi
+          if [ -n "$INPUT_MACHINE_ID" ]; then
+            DEFINES="$DEFINES --dart-define=LAB_MACHINE_ID=$INPUT_MACHINE_ID"
+          fi
+          if [ -n "$INPUT_MACHINE_PASSWORD" ]; then
+            DEFINES="$DEFINES --dart-define=LAB_MACHINE_PASSWORD=$INPUT_MACHINE_PASSWORD"
+          fi
+          if [ -n "$INPUT_RENDEZVOUS" ]; then
+            DEFINES="$DEFINES --dart-define=LAB_RENDEZVOUS_SERVER=$INPUT_RENDEZVOUS"
+          fi
+          if [ -n "$INPUT_PUB_KEY" ]; then
+            DEFINES="$DEFINES --dart-define=LAB_RS_PUB_KEY=$INPUT_PUB_KEY"
+          fi
+          if [ -n "$INPUT_RELAY" ]; then
+            DEFINES="$DEFINES --dart-define=LAB_RELAY_SERVER=$INPUT_RELAY"
+          fi
+
+          echo "Exporting FLUTTER_BUILD_ARGS"
+          export FLUTTER_BUILD_ARGS="$DEFINES"
+
+          # Build Rust library and Flutter Windows app
+          python3 ./build.py --portable --flutter --skip-portable-pack --hwcodec --vram
+
+          # Move release output
+          mv ./flutter/build/windows/x64/runner/Release ./rustdesk
+
+          # Download and unpack usbmmidd_v2 driver
+          curl -LO https://github.com/rustdesk-org/rdev/releases/download/usbmmidd_v2/usbmmidd_v2.zip
+          unzip -q usbmmidd_v2.zip
+          rm -rf usbmmidd_v2/Win32 usbmmidd_v2/deviceinstaller64.exe usbmmidd_v2/deviceinstaller.exe usbmmidd_v2/usbmmidd.bat
+          mv -f usbmmidd_v2 ./rustdesk/
+
+          # Build self-extracting single executable
+          sed -i '/dpiAware/d' res/manifest.xml
+          pushd ./libs/portable
+          pip3 install -r requirements.txt
+          python3 ./generate.py -f ../../rustdesk/ -o . -e ../../rustdesk/rustdesk.exe
+          popd
+          mkdir -p ./Output
+          mv ./target/release/rustdesk-portable-packer.exe ./Output/LabDesk-windows-x64.exe
+
+      - name: Upload Windows Executable
+        uses: actions/upload-artifact@v4
+        with:
+          name: LabDesk-windows-x64
+          path: ./Output/LabDesk-windows-x64.exe
+
+      - name: Upload Raw Runner Folder
+        uses: actions/upload-artifact@v4
+        with:
+          name: LabDesk-windows-raw-folder
+          path: ./rustdesk
+
+  build-macos:
+    name: Build macOS Lab Client (DMG)
+    runs-on: macos-14
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: "stable"
+          flutter-version: "3.44.2"
+          cache: true
+
+      - name: Prepare stub RustDesk dylib for macOS linking
+        shell: bash
+        run: |
+          mkdir -p target/debug target/release
+          clang -shared -undefined dynamic_lookup -mmacosx-version-min=12.0 -o target/debug/liblibrustdesk.dylib -x c - <<'EOF'
+          void handle_applicationShouldOpenUntitledFile(void) {}
+          void rustdesk_core_main(void) {}
+          EOF
+          cp target/debug/liblibrustdesk.dylib target/release/liblibrustdesk.dylib
+
+      - name: Build macOS application
+        shell: bash
+        env:
+          INPUT_API_URL: ${{ inputs.api_url || secrets.LAB_API_URL }}
+          INPUT_SECRET: ${{ inputs.shared_secret || secrets.LAB_SHARED_SECRET }}
+          INPUT_MACHINE_ID: ${{ inputs.machine_id || secrets.LAB_MACHINE_ID }}
+          INPUT_MACHINE_PASSWORD: ${{ inputs.machine_password || secrets.LAB_MACHINE_PASSWORD }}
+        run: |
+          DEFINES="--dart-define=LAB_MODE=true"
+          if [ -n "$INPUT_API_URL" ]; then
+            DEFINES="$DEFINES --dart-define=LAB_API_URL=$INPUT_API_URL"
+          fi
+          if [ -n "$INPUT_SECRET" ]; then
+            DEFINES="$DEFINES --dart-define=LAB_SHARED_SECRET=$INPUT_SECRET"
+          fi
+          if [ -n "$INPUT_MACHINE_ID" ]; then
+            DEFINES="$DEFINES --dart-define=LAB_MACHINE_ID=$INPUT_MACHINE_ID"
+          fi
+          if [ -n "$INPUT_MACHINE_PASSWORD" ]; then
+            DEFINES="$DEFINES --dart-define=LAB_MACHINE_PASSWORD=$INPUT_MACHINE_PASSWORD"
+          fi
+
+          cd flutter
+          flutter pub get
+          cd macos && pod install && cd ..
+          flutter build macos -t lib/main_lab_preview.dart --debug $DEFINES
+          cd ..
+
+          hdiutil create -volname "LabDesk" -srcfolder flutter/build/macos/Build/Products/Debug/LabDesk.app -ov -format UDZO LabDesk-macOS.dmg
+
+      - name: Upload macOS DMG
+        uses: actions/upload-artifact@v4
+        with:
+          name: LabDesk-macOS-dmg
+          path: LabDesk-macOS.dmg
