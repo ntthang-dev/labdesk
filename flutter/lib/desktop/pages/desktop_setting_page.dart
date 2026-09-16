@@ -1885,8 +1885,8 @@ class _DisplayState extends State<_Display> {
 
   Widget viewStyle(BuildContext context) {
     final isOptFixed = isOptionFixed(kOptionViewStyle);
-    onChanged(String value) async {
-      await bind.mainSetUserDefaultOption(key: kOptionViewStyle, value: value);
+    onChanged(dynamic value) async {
+      await bind.mainSetUserDefaultOption(key: kOptionViewStyle, value: value.toString());
       setState(() {});
     }
 
@@ -1907,9 +1907,9 @@ class _DisplayState extends State<_Display> {
 
   Widget scrollStyle(BuildContext context) {
     final isOptFixed = isOptionFixed(kOptionScrollStyle);
-    onChanged(String value) async {
+    onChanged(dynamic value) async {
       await bind.mainSetUserDefaultOption(
-          key: kOptionScrollStyle, value: value);
+          key: kOptionScrollStyle, value: value.toString());
       setState(() {});
     }
 
@@ -1953,9 +1953,9 @@ class _DisplayState extends State<_Display> {
   }
 
   Widget imageQuality(BuildContext context) {
-    onChanged(String value) async {
+    onChanged(dynamic value) async {
       await bind.mainSetUserDefaultOption(
-          key: kOptionImageQuality, value: value);
+          key: kOptionImageQuality, value: value.toString());
       setState(() {});
     }
 
@@ -2080,8 +2080,8 @@ class _DisplayState extends State<_Display> {
     }
 
     final key = 'privacy-mode-impl-key';
-    onChanged(String value) async {
-      await bind.mainSetOption(key: key, value: value);
+    onChanged(dynamic value) async {
+      await bind.mainSetOption(key: key, value: value.toString());
       setState(() {});
     }
 
