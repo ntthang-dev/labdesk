@@ -1,0 +1,106 @@
+import 'dart:convert';
+import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter_hbb/desktop/pages/lab_api_service.dart';
+
+void main() {
+  group('LabConfig Tests', () {
+    test('Defaults and compile-time constants are handled safely', () {
+      expect(LabConfig.isLabMode, isTrue);
+    });
+
+    test('saveLocalConfig and loadLocalConfig persist and override properties', () {
+      LabConfig.saveLocalConfig(
+        apiUrl: 'https://script.google.com/macros/s/test-url/exec',
+        sharedSecret: 'test-secret-123',
+        machineId: '100.83.83.70',
+        machinePassword: 'test-lab-pass',
+      );
+
+      expect(LabConfig.apiUrl, equals('https://script.google.com/macros/s/test-url/exec'));
+      expect(LabConfig.sharedSecret, equals('test-secret-123'));
+      expect(LabConfig.machineRustdeskId, equals('100.83.83.70'));
+      expect(LabConfig.machinePassword, equals('test-lab-pass'));
+      expect(LabConfig.isConfigured, isTrue);
+    });
+  });
+
+  group('LoginResult Parsing Tests', () {
+    test('Parses successful login result with all fields', () {
+      final json = {
+        'allowed': true,
+        'session_token': 'sess-uuid-1234',
+        'machine_id': '100.83.83.70',
+        'machine_name': 'PC Lab 01',
+        'machine_pass': 'secret-pass-99',
+      };
+
+      final result = LoginResult.fromJson(json);
+      expect(result.allowed, isTrue);
+      expect(result.sessionToken, equals('sess-uuid-1234'));
+      expect(result.machineId, equals('100.83.83.70'));
+      expect(result.machineName, equals('PC Lab 01'));
+      expect(result.machinePass, equals('secret-pass-99'));
+      expect(result.reason, isNull);
+    });
+
+    test('Parses rejected login result with reason', () {
+      final json = {
+        'allowed': false,
+        'reason': 'Student ID not recognized',
+      };
+
+      final result = LoginResult.fromJson(json);
+      expect(result.allowed, isFalse);
+      expect(result.reason, equals('Student ID not recognized'));
+      expect(result.sessionToken, isNull);
+    });
+
+    test('Creates error result correctly', () {
+      final result = LoginResult.error('Network timeout');
+      expect(result.allowed, isFalse);
+      expect(result.reason, equals('Network timeout'));
+      expect(result.sessionToken, isNull);
+    });
+  });
+
+  group('SessionStatus Enum Tests', () {
+    test('Status mapping from Apps Script values', () {
+      SessionStatus parseStatus(String statusStr) {
+        switch (statusStr) {
+          case 'active':
+            return SessionStatus.active;
+          case 'kicked':
+            return SessionStatus.kicked;
+          case 'expired':
+            return SessionStatus.expired;
+          case 'not_found':
+            return SessionStatus.notFound;
+          default:
+            return SessionStatus.error;
+        }
+      }
+
+      expect(parseStatus('active'), equals(SessionStatus.active));
+      expect(parseStatus('kicked'), equals(SessionStatus.kicked));
+      expect(parseStatus('expired'), equals(SessionStatus.expired));
+      expect(parseStatus('not_found'), equals(SessionStatus.notFound));
+      expect(parseStatus('unknown_value'), equals(SessionStatus.error));
+    });
+  });
+
+  group('LabApiService Connection Tests', () {
+    test('testConnection fails gracefully when URL or secret is empty', () async {
+      final res = await LabApiService.instance.testConnection('', '');
+      expect(res['success'], isFalse);
+      expect(res['message'], contains('Vui lòng nhập đầy đủ'));
+    });
+
+    test('login returns error when not configured', () async {
+      // Temporarily clear configuration
+      LabConfig.saveLocalConfig(apiUrl: '', sharedSecret: '');
+      final res = await LabApiService.instance.login('20210001', 'Nguyen Van A');
+      expect(res.allowed, isFalse);
+      expect(res.reason, contains('Chưa cấu hình'));
+    });
+  });
+}

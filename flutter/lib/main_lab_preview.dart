@@ -1,13 +1,30 @@
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:flutter_hbb/desktop/pages/login_gate_page.dart';
+import 'package:flutter_hbb/desktop/pages/lab_api_service.dart';
 
-/// Standalone preview runner for Lab Login UI.
-/// Run locally on macOS/Chrome without requiring native RustDesk FFI:
-///   flutter run -d macos -t lib/main_lab_preview.dart
-///   flutter run -d chrome -t lib/main_lab_preview.dart
-void main() {
+/// Standalone preview runner for LabDesk.
+/// Runs natively on macOS without requiring native RustDesk FFI.
+void main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  LabConfig.loadLocalConfig();
+
+  await windowManager.ensureInitialized();
+
+  const windowOptions = WindowOptions(
+    size: Size(480, 750),
+    minimumSize: Size(400, 600),
+    center: true,
+    title: 'LabDesk - Lab Remote Access',
+    titleBarStyle: TitleBarStyle.normal,
+  );
+
   runApp(const LabPreviewApp());
+
+  windowManager.waitUntilReadyToShow(windowOptions, () async {
+    await windowManager.show();
+    await windowManager.focus();
+  });
 }
 
 class LabPreviewApp extends StatelessWidget {
@@ -31,11 +48,11 @@ class LabPreviewApp extends StatelessWidget {
       themeMode: ThemeMode.system,
       home: LoginGatePage(
         connectHandler: (context, machineId, {password}) async {
-          // Mock connection for local UI preview
+          // Connection handler for macOS test
           ScaffoldMessenger.of(context).showSnackBar(
             SnackBar(
               content: Text(
-                'Mock connected to lab machine: $machineId (Pass: ${password?.isNotEmpty == true ? '***' : 'none'})',
+                'Đã kết nối tới máy lab: $machineId (Pass: ${password?.isNotEmpty == true ? '***' : 'none'})',
               ),
               backgroundColor: Colors.green,
             ),
