@@ -9,6 +9,7 @@ import 'package:flutter/material.dart' hide TabBarTheme;
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/consts.dart';
 import 'package:flutter_hbb/desktop/pages/remote_page.dart';
+import 'package:flutter_hbb/desktop/pages/lab_api_service.dart';
 import 'package:flutter_hbb/desktop/pages/view_camera_page.dart';
 import 'package:flutter_hbb/main.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
@@ -280,6 +281,13 @@ class DesktopTab extends StatefulWidget {
   }) : super(key: key);
 
   static RxString tablabelGetter(String peerId) {
+    // The lab client must never surface the host's id/IP or hostname in any tab
+    // (remote desktop, file transfer, terminal, ...): getDesktopTabLabel falls
+    // back to the raw peerId, and appends the peer's real hostname, when no
+    // alias is set.
+    if (LabConfig.isLabMode) {
+      return RxString('LabDesk');
+    }
     final alias = bind.mainGetPeerOptionSync(id: peerId, key: 'alias');
     return RxString(getDesktopTabLabel(peerId, alias));
   }
