@@ -2,7 +2,9 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_hbb/common.dart';
 import 'package:flutter_hbb/desktop/pages/lab_api_service.dart';
+import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
+import 'package:window_manager/window_manager.dart';
 
 typedef ConnectHandler = Future<void> Function(
   BuildContext context,
@@ -18,7 +20,7 @@ class LoginGatePage extends StatefulWidget {
   State<LoginGatePage> createState() => _LoginGatePageState();
 }
 
-class _LoginGatePageState extends State<LoginGatePage> {
+class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
   final _nameController = TextEditingController();
   final _studentIdController = TextEditingController();
   final _formKey = GlobalKey<FormState>();
@@ -34,14 +36,36 @@ class _LoginGatePageState extends State<LoginGatePage> {
   void initState() {
     super.initState();
     LabConfig.loadLocalConfig();
+    if (widget.connectHandler == null) {
+      windowManager.addListener(this);
+    }
   }
 
   @override
   void dispose() {
+    if (widget.connectHandler == null) {
+      windowManager.removeListener(this);
+    }
     _pollTimer?.cancel();
     _nameController.dispose();
     _studentIdController.dispose();
     super.dispose();
+  }
+
+  // main.dart sets windowManager.setPreventClose(true) so every RustDesk window
+  // can decide how to react; the normal main window then just hides to the tray
+  // (see DesktopTab.onWindowClose in tabbar_widget.dart). LabDesk isn't a
+  // background service on student machines, so hiding leaves an invisible,
+  // still-running app with no way back in and no session cleanup - the app
+  // looks "stuck" exactly like this was reported. Free the slot, then force-quit.
+  @override
+  void onWindowClose() async {
+    final token = _activeSessionToken;
+    if (token != null) {
+      await LabApiService.instance.logout(token);
+    }
+    bind.mainOnMainWindowClose();
+    await windowManager.destroy();
   }
 
   Future<void> _handleLogin() async {

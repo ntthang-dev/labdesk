@@ -237,7 +237,10 @@ class LabApiService {
       return LoginResult.error(
           'Máy chủ phản hồi lỗi (${response.statusCode})');
     } catch (e) {
-      return LoginResult.error('Lỗi mạng: $e');
+      // Never interpolate `e`: on a network failure it can embed resolver/host
+      // details, and there is nothing a student can act on from that anyway.
+      return LoginResult.error(
+          'Không thể liên hệ máy chủ đăng nhập. Vui lòng kiểm tra kết nối mạng hoặc liên hệ Quản trị viên.');
     }
   }
 
