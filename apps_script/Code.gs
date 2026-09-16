@@ -94,6 +94,12 @@ function doGet(e) {
     }
 
     switch (action) {
+      case 'ping':
+        return jsonResponse({
+          status: 'ok',
+          message: 'Google Apps Script Web App is connected successfully!',
+          time: now()
+        });
       case 'status':
         return handleStatus(e.parameter);
       default:

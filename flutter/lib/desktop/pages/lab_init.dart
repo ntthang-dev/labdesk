@@ -13,6 +13,7 @@ class LabServerConfig {
 }
 
 Future<void> initLabMode() async {
+  LabConfig.loadLocalConfig();
   if (!LabConfig.isLabMode) return;
 
   // Set server config if provided via build-time env vars

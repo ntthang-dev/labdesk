@@ -2010,9 +2010,9 @@ class _DisplayState extends State<_Display> {
   }
 
   Widget codec(BuildContext context) {
-    onChanged(String value) async {
+    onChanged(dynamic value) async {
       await bind.mainSetUserDefaultOption(
-          key: kOptionCodecPreference, value: value);
+          key: kOptionCodecPreference, value: value.toString());
       setState(() {});
     }
 

@@ -1,30 +1,85 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:http/http.dart' as http;
 
-/// Configuration for the lab API, read from compile-time constants.
+/// Configuration for the lab API, supporting compile-time constants
+/// and persistent local fallback for ease of testing.
 class LabConfig {
-  /// Apps Script Web App URL. Set via --dart-define=LAB_API_URL=...
-  static const String apiUrl =
+  static const String _envApiUrl =
       String.fromEnvironment('LAB_API_URL', defaultValue: '');
-
-  /// Shared secret between client and Apps Script.
-  static const String sharedSecret =
+  static const String _envSharedSecret =
       String.fromEnvironment('LAB_SHARED_SECRET', defaultValue: '');
-
-  /// RustDesk ID of the lab machine (for single-machine setup).
-  static const String machineRustdeskId =
+  static const String _envMachineId =
       String.fromEnvironment('LAB_MACHINE_ID', defaultValue: '');
-
-  /// Permanent password of the lab machine.
-  static const String machinePassword =
+  static const String _envMachinePassword =
       String.fromEnvironment('LAB_MACHINE_PASSWORD', defaultValue: '');
 
-  /// Whether lab mode is enabled.
+  static String? _overrideApiUrl;
+  static String? _overrideSharedSecret;
+  static String? _overrideMachineId;
+  static String? _overrideMachinePassword;
+
+  static String get apiUrl => _overrideApiUrl ?? _envApiUrl;
+  static String get sharedSecret => _overrideSharedSecret ?? _envSharedSecret;
+  static String get machineRustdeskId =>
+      _overrideMachineId ?? _envMachineId;
+  static String get machinePassword =>
+      _overrideMachinePassword ?? _envMachinePassword;
+
+  /// Whether lab mode is enabled. Defaults to true when compiled into LabDesk.
   static const bool isLabMode =
-      bool.fromEnvironment('LAB_MODE', defaultValue: false);
+      bool.fromEnvironment('LAB_MODE', defaultValue: true);
 
   static bool get isConfigured =>
-      apiUrl.isNotEmpty && sharedSecret.isNotEmpty;
+      apiUrl.trim().isNotEmpty && sharedSecret.trim().isNotEmpty;
+
+  static bool get isCompileTimeLocked =>
+      _envApiUrl.isNotEmpty && _envSharedSecret.isNotEmpty;
+
+  static File get _configFile {
+    final home = Platform.environment['HOME'] ??
+        Platform.environment['USERPROFILE'] ??
+        '.';
+    return File('$home/.labdesk_config.json');
+  }
+
+  static void loadLocalConfig() {
+    try {
+      final f = _configFile;
+      if (f.existsSync()) {
+        final data =
+            jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+        _overrideApiUrl = data['api_url'] as String?;
+        _overrideSharedSecret = data['shared_secret'] as String?;
+        _overrideMachineId = data['machine_id'] as String?;
+        _overrideMachinePassword = data['machine_password'] as String?;
+      }
+    } catch (_) {}
+  }
+
+  static void saveLocalConfig({
+    required String apiUrl,
+    required String sharedSecret,
+    String? machineId,
+    String? machinePassword,
+  }) {
+    _overrideApiUrl = apiUrl.trim();
+    _overrideSharedSecret = sharedSecret.trim();
+    if (machineId != null) _overrideMachineId = machineId.trim();
+    if (machinePassword != null) {
+      _overrideMachinePassword = machinePassword.trim();
+    }
+
+    try {
+      final f = _configFile;
+      f.writeAsStringSync(jsonEncode({
+        'api_url': _overrideApiUrl,
+        'shared_secret': _overrideSharedSecret,
+        'machine_id': _overrideMachineId ?? '',
+        'machine_password': _overrideMachinePassword ?? '',
+      }));
+    } catch (_) {}
+  }
 }
 
 class LoginResult {
@@ -68,33 +123,110 @@ class LabApiService {
 
   final http.Client _client = http.Client();
 
-  Future<LoginResult> login(String studentId, String fullName) async {
-    if (!LabConfig.isConfigured) {
-      return LoginResult.error('Lab API not configured');
+  /// Sends HTTP request and explicitly follows 301/302/303 redirects (Google Apps Script).
+  Future<http.Response> _sendWithRedirect(
+    Uri uri, {
+    required String method,
+    Map<String, String>? headers,
+    String? body,
+    Duration timeout = const Duration(seconds: 15),
+  }) async {
+    http.Request request = http.Request(method, uri);
+    if (headers != null) request.headers.addAll(headers);
+    if (body != null) request.body = body;
+    request.followRedirects = false;
+
+    http.StreamedResponse streamed =
+        await _client.send(request).timeout(timeout);
+    http.Response response = await http.Response.fromStream(streamed);
+
+    int redirects = 0;
+    while ([301, 302, 303, 307, 308].contains(response.statusCode) &&
+        redirects < 5) {
+      redirects++;
+      final location = response.headers['location'];
+      if (location == null || location.isEmpty) break;
+      final redirectUri = Uri.parse(location);
+      final getReq = http.Request('GET', redirectUri);
+      final nextStreamed = await _client.send(getReq).timeout(timeout);
+      response = await http.Response.fromStream(nextStreamed);
+    }
+    return response;
+  }
+
+  /// Pings Google Apps Script Web App to verify connectivity.
+  Future<Map<String, dynamic>> testConnection([
+    String? testUrl,
+    String? testSecret,
+  ]) async {
+    final url = (testUrl ?? LabConfig.apiUrl).trim();
+    final secret = (testSecret ?? LabConfig.sharedSecret).trim();
+    if (url.isEmpty || secret.isEmpty) {
+      return {
+        'success': false,
+        'message': 'Vui lòng nhập đầy đủ URL và Shared Secret'
+      };
     }
     try {
-      final response = await _client
-          .post(
-            Uri.parse(LabConfig.apiUrl),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'action': 'login',
-              'student_id': studentId,
-              'full_name': fullName,
-              'secret': LabConfig.sharedSecret,
-            }),
-          )
-          .timeout(const Duration(seconds: 15));
+      final uri = Uri.parse(url).replace(queryParameters: {
+        'action': 'ping',
+        'secret': secret,
+      });
+      final response = await _sendWithRedirect(
+        uri,
+        method: 'GET',
+        timeout: const Duration(seconds: 12),
+      );
 
-      if (response.statusCode == 200 || response.statusCode == 302) {
-        // Apps Script Web App may return 302 redirect; http package follows it.
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        if (data['status'] == 'ok') {
+          return {
+            'success': true,
+            'message':
+                data['message'] ?? 'Kết nối tới Google Sheets API thành công!'
+          };
+        } else if (data['error'] == 'unauthorized') {
+          return {
+            'success': false,
+            'message': 'Sai Secret Key (Unauthorized 403)'
+          };
+        }
+      }
+      return {
+        'success': false,
+        'message': 'Phản hồi HTTP ${response.statusCode}: ${response.body}'
+      };
+    } catch (e) {
+      return {'success': false, 'message': 'Không thể kết nối tới URL: $e'};
+    }
+  }
+
+  Future<LoginResult> login(String studentId, String fullName) async {
+    if (!LabConfig.isConfigured) {
+      return LoginResult.error('Chưa cấu hình Google Apps Script API');
+    }
+    try {
+      final response = await _sendWithRedirect(
+        Uri.parse(LabConfig.apiUrl),
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'login',
+          'student_id': studentId,
+          'full_name': fullName,
+          'secret': LabConfig.sharedSecret,
+        }),
+      );
+
+      if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         return LoginResult.fromJson(data);
       }
       return LoginResult.error(
-          'Server error (${response.statusCode})');
+          'Máy chủ phản hồi lỗi (${response.statusCode})');
     } catch (e) {
-      return LoginResult.error('Network error: $e');
+      return LoginResult.error('Lỗi mạng: $e');
     }
   }
 
@@ -106,8 +238,11 @@ class LabApiService {
         'token': sessionToken,
         'secret': LabConfig.sharedSecret,
       });
-      final response =
-          await _client.get(uri).timeout(const Duration(seconds: 10));
+      final response = await _sendWithRedirect(
+        uri,
+        method: 'GET',
+        timeout: const Duration(seconds: 10),
+      );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
@@ -133,17 +268,17 @@ class LabApiService {
   Future<bool> logout(String sessionToken) async {
     if (!LabConfig.isConfigured) return false;
     try {
-      final response = await _client
-          .post(
-            Uri.parse(LabConfig.apiUrl),
-            headers: {'Content-Type': 'application/json'},
-            body: jsonEncode({
-              'action': 'logout',
-              'session_token': sessionToken,
-              'secret': LabConfig.sharedSecret,
-            }),
-          )
-          .timeout(const Duration(seconds: 10));
+      final response = await _sendWithRedirect(
+        Uri.parse(LabConfig.apiUrl),
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'logout',
+          'session_token': sessionToken,
+          'secret': LabConfig.sharedSecret,
+        }),
+        timeout: const Duration(seconds: 10),
+      );
 
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
