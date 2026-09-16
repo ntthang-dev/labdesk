@@ -28,6 +28,7 @@ class _LoginGatePageState extends State<LoginGatePage> {
   String? _activeSessionToken;
   String? _connectedMachineName;
   Timer? _pollTimer;
+  DateTime? _connectedAt;
 
   @override
   void initState() {
@@ -68,12 +69,14 @@ class _LoginGatePageState extends State<LoginGatePage> {
     if (result.allowed) {
       _activeSessionToken = result.sessionToken;
 
-      final machineId = LabConfig.machineRustdeskId.isNotEmpty
-          ? LabConfig.machineRustdeskId
-          : (result.machineId ?? '');
-      final password = LabConfig.machinePassword.isNotEmpty
-          ? LabConfig.machinePassword
-          : (result.machinePass ?? '');
+      // The sheet row is authoritative: it is what the admin edits when a lab
+      // machine changes. The baked-in values are only a fallback.
+      final machineId = (result.machineId?.isNotEmpty ?? false)
+          ? result.machineId!
+          : LabConfig.machineRustdeskId;
+      final password = (result.machinePass?.isNotEmpty ?? false)
+          ? result.machinePass!
+          : LabConfig.machinePassword;
 
       if (machineId.isEmpty) {
         setState(() {
@@ -115,6 +118,7 @@ class _LoginGatePageState extends State<LoginGatePage> {
   }
 
   void _startPolling() {
+    _connectedAt = DateTime.now();
     _pollTimer?.cancel();
     _pollTimer = Timer.periodic(const Duration(seconds: 12), (_) async {
       await _pollStatus();
@@ -128,9 +132,15 @@ class _LoginGatePageState extends State<LoginGatePage> {
       return;
     }
 
-    if (widget.connectHandler == null &&
+    final connectedAt = _connectedAt;
+    final settled = connectedAt == null ||
+        DateTime.now().difference(connectedAt) > const Duration(seconds: 20);
+
+    if (settled &&
+        widget.connectHandler == null &&
         !rustDeskWinManager.hasActiveRemoteDesktopWindows()) {
       _pollTimer?.cancel();
+      _connectedAt = null;
       await LabApiService.instance.logout(token);
       if (mounted) {
         setState(() {
@@ -149,6 +159,7 @@ class _LoginGatePageState extends State<LoginGatePage> {
       _pollTimer?.cancel();
       _activeSessionToken = null;
       _connectedMachineName = null;
+      _connectedAt = null;
 
       if (widget.connectHandler == null) {
         await rustDeskWinManager.closeAllSubWindows();
@@ -165,6 +176,7 @@ class _LoginGatePageState extends State<LoginGatePage> {
       _pollTimer?.cancel();
       _activeSessionToken = null;
       _connectedMachineName = null;
+      _connectedAt = null;
       if (widget.connectHandler == null) {
         await rustDeskWinManager.closeAllSubWindows();
       }
@@ -179,6 +191,7 @@ class _LoginGatePageState extends State<LoginGatePage> {
   Future<void> _handleDisconnect() async {
     final token = _activeSessionToken;
     _pollTimer?.cancel();
+    _connectedAt = null;
     setState(() => _isLoading = true);
 
     if (token != null) {

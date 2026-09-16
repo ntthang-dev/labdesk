@@ -15,6 +15,10 @@
 const PROPS = PropertiesService.getScriptProperties();
 const SHARED_SECRET = PROPS.getProperty('SHARED_SECRET') || 'change-me';
 
+// A client polls `status` every ~12s. If nothing has been heard for this long the
+// student's machine died or the app was force-quit, so the slot is reclaimed.
+const SESSION_TIMEOUT_MS = 60 * 1000;
+
 // ----- helpers -----
 
 function getSheet(name) {
@@ -60,6 +64,60 @@ function setSessionCell(row, headers, colName, value) {
   sheet.getRange(row, colIdx + 1).setValue(value);
 }
 
+// `last_seen` was added after the first deployments; create it so an existing
+// spreadsheet keeps working without the admin editing headers by hand.
+function ensureColumn(sheetName, colName) {
+  const sheet = getSheet(sheetName);
+  if (!sheet) return;
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+  if (headers.indexOf(colName) === -1) {
+    sheet.getRange(1, headers.length + 1).setValue(colName);
+  }
+}
+
+function freeSessionRow(row, headers) {
+  setSessionCell(row, headers, 'status', 'free');
+  setSessionCell(row, headers, 'student_id', '');
+  setSessionCell(row, headers, 'full_name', '');
+  setSessionCell(row, headers, 'session_token', '');
+  setSessionCell(row, headers, 'started_at', '');
+  setSessionCell(row, headers, 'admin_action', '');
+  setSessionCell(row, headers, 'last_seen', '');
+}
+
+function parseTime(value) {
+  if (!value) return 0;
+  if (value instanceof Date) return value.getTime();
+  const t = new Date(String(value)).getTime();
+  return isNaN(t) ? 0 : t;
+}
+
+// Free any occupied row whose client stopped checking in. Returns true if the
+// sheet was modified, so the caller knows to re-read it.
+function reapStaleSessions() {
+  const sheet = getSheet('ActiveSessions');
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return false;
+  const headers = data[0];
+  const statusCol = headers.indexOf('status');
+  const lastSeenCol = headers.indexOf('last_seen');
+  if (statusCol === -1 || lastSeenCol === -1) return false;
+
+  const cutoff = Date.now() - SESSION_TIMEOUT_MS;
+  let changed = false;
+  for (let r = 1; r < data.length; r++) {
+    if (String(data[r][statusCol]).trim().toLowerCase() !== 'occupied') continue;
+    const seen = parseTime(data[r][lastSeenCol]) ||
+        parseTime(data[r][headers.indexOf('started_at')]);
+    if (seen === 0 || seen > cutoff) continue;
+    writeAuditLog(data[r][headers.indexOf('student_id')],
+        data[r][headers.indexOf('machine_id')], 'expired', 'No heartbeat');
+    freeSessionRow(r + 1, headers);
+    changed = true;
+  }
+  return changed;
+}
+
 // ----- API handlers -----
 
 function doPost(e) {
@@ -71,13 +129,21 @@ function doPost(e) {
       return jsonResponse({ error: 'unauthorized' }, 403);
     }
 
-    switch (action) {
-      case 'login':
-        return handleLogin(body);
-      case 'logout':
-        return handleLogout(body);
-      default:
-        return jsonResponse({ error: 'unknown action' }, 400);
+    // Allocating a machine is read-then-write; without a lock two simultaneous
+    // logins can both see the same row as free.
+    const lock = LockService.getScriptLock();
+    lock.waitLock(20000);
+    try {
+      switch (action) {
+        case 'login':
+          return handleLogin(body);
+        case 'logout':
+          return handleLogout(body);
+        default:
+          return jsonResponse({ error: 'unknown action' }, 400);
+      }
+    } finally {
+      lock.releaseLock();
     }
   } catch (err) {
     return jsonResponse({ error: err.message }, 500);
@@ -139,6 +205,9 @@ function handleLogin(body) {
       }
     }
   }
+
+  ensureColumn('ActiveSessions', 'last_seen');
+  reapStaleSessions();
 
   // Check if student already has an active session on ANY machine
   const sessSheet = getSheet('ActiveSessions');
@@ -202,6 +271,7 @@ function handleLogin(body) {
   setSessionCell(targetRow.row, sessHeaders, 'session_token', token);
   setSessionCell(targetRow.row, sessHeaders, 'started_at', now());
   setSessionCell(targetRow.row, sessHeaders, 'admin_action', '');
+  setSessionCell(targetRow.row, sessHeaders, 'last_seen', now());
 
   writeAuditLog(student_id, machineId, 'login_allowed', '');
 
@@ -233,17 +303,13 @@ function handleStatus(params) {
     // Process the kick
     const studentId = found.data['student_id'];
     const machineId = found.data['machine_id'];
-    setSessionCell(found.row, found.headers, 'status', 'free');
-    setSessionCell(found.row, found.headers, 'student_id', '');
-    setSessionCell(found.row, found.headers, 'full_name', '');
-    setSessionCell(found.row, found.headers, 'session_token', '');
-    setSessionCell(found.row, found.headers, 'started_at', '');
-    setSessionCell(found.row, found.headers, 'admin_action', '');
+    freeSessionRow(found.row, found.headers);
 
     writeAuditLog(studentId, machineId, 'kicked', 'Admin kick');
     return jsonResponse({ status: 'kicked' });
   }
 
+  setSessionCell(found.row, found.headers, 'last_seen', now());
   return jsonResponse({ status: 'active' });
 }
 
@@ -263,12 +329,7 @@ function handleLogout(body) {
   const studentId = found.data['student_id'];
   const machineId = found.data['machine_id'];
 
-  setSessionCell(found.row, found.headers, 'status', 'free');
-  setSessionCell(found.row, found.headers, 'student_id', '');
-  setSessionCell(found.row, found.headers, 'full_name', '');
-  setSessionCell(found.row, found.headers, 'session_token', '');
-  setSessionCell(found.row, found.headers, 'started_at', '');
-  setSessionCell(found.row, found.headers, 'admin_action', '');
+  freeSessionRow(found.row, found.headers);
 
   writeAuditLog(studentId, machineId, 'logout', '');
   return jsonResponse({ success: true });

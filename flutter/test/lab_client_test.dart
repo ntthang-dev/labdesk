@@ -1,13 +1,24 @@
 import 'dart:convert';
+import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/desktop/pages/lab_api_service.dart';
 
 void main() {
+  // saveLocalConfig writes to the real ~/.labdesk_config.json; leaving test
+  // values behind would override a locally built client.
+  tearDownAll(() {
+    final home = Platform.environment['HOME'] ??
+        Platform.environment['USERPROFILE'] ??
+        '.';
+    final f = File('$home/.labdesk_config.json');
+    if (f.existsSync()) f.deleteSync();
+  });
+
   group('LabConfig Tests', () {
     test('Defaults and compile-time constants are handled safely', () {
       expect(LabConfig.isLabMode, isTrue);
-      expect(LabConfig.machineRustdeskId, equals('100.83.83.70'));
-      expect(LabConfig.machinePassword, equals('mat_khau_may_lab'));
+      expect(LabConfig.machineRustdeskId, isEmpty);
+      expect(LabConfig.machinePassword, isEmpty);
       expect(LabConfig.sharedSecret, equals('your-secret-key-here'));
     });
 

@@ -18,11 +18,13 @@
 ### Sheet 2: `ActiveSessions`
 **Pre-populate one row per lab machine:**
 
-| machine_id | machine_name | status | student_id | full_name | session_token | started_at | admin_action | machine_pass |
-|-----------|-------------|--------|-----------|-----------|---------------|-----------|--------------|--------------|
-| 100.83.83.70 | PC Lab 01 | free   |           |           |               |           |              | mat_khau_may_lab |
+| machine_id | machine_name | status | student_id | full_name | session_token | started_at | admin_action | machine_pass | last_seen |
+|-----------|-------------|--------|-----------|-----------|---------------|-----------|--------------|--------------|-----------|
+| 100.83.83.70 | PC Lab 01 | free   |           |           |               |           |              | (mật khẩu máy lab) |           |
 
-> `machine_id` có thể là IP Tailscale (`100.83.83.70`) hoặc mã RustDesk ID (9 chữ số). `machine_pass` là mật khẩu cố định đã đặt trên máy lab (`rustdesk.exe --password <pass>`).
+> `machine_id` có thể là IP Tailscale (`100.83.83.70`) hoặc mã RustDesk ID (9 chữ số). `machine_pass` là mật khẩu cố định đã đặt trên máy lab (`rustdesk.exe --password <pass>`) — client lấy mật khẩu từ đây nên **không** cần bake vào bản build.
+>
+> `last_seen` được script tự ghi mỗi lần client poll. Nếu quên tạo cột, script sẽ tự thêm ở lần `login` đầu tiên. Một phiên không còn heartbeat quá 60 giây sẽ tự được giải phóng và ghi `expired` vào `AuditLog` — nhờ vậy sinh viên tắt cứng app không làm kẹt máy.
 
 ### Sheet 3: `AuditLog`
 **Just create the header row:**
@@ -46,6 +48,8 @@
 3. Add: `SHARED_SECRET` = `your-secret-key-here` (choose a strong random string)
 4. Click **Save script properties**
 
+> Sinh một chuỗi mạnh bằng `openssl rand -hex 24`. `SHARED_SECRET` **không phải** mật khẩu RustDesk của máy lab — nó chỉ để chặn người ngoài gọi thẳng Web App URL.
+
 ## 5. Deploy as Web App
 
 1. Click **Deploy** → **New deployment**
@@ -66,7 +70,7 @@ curl -X POST "YOUR_WEB_APP_URL" \
   -d '{"action":"login","student_id":"20210001","full_name":"Nguyen Van A","secret":"your-secret-key-here"}'
 ```
 
-Expected: `{"allowed":true,"session_token":"...","machine_id":"LAB-PC-01","machine_name":"PC Lab 1"}`
+Expected: `{"allowed":true,"session_token":"...","machine_id":"100.83.83.70","machine_name":"PC Lab 01","machine_pass":"..."}`
 
 ### Test status:
 ```bash
@@ -94,4 +98,11 @@ Expected: `{"success":true}`
 - **View who's connected**: Open `ActiveSessions` sheet — see `status`, `student_id`, `full_name`, `started_at`
 - **Kick a student**: Type `kick` in `admin_action` column of that row → within 12-15 seconds the student's client disconnects
 - **View logs**: Open `AuditLog` sheet — all events logged with timestamps
+- **Slot bị kẹt**: không cần làm gì, sau 60 giây không có heartbeat script tự trả máy về `free`
 - **Block a student**: In `Students` sheet, change their `status` to `suspended`
+
+## Sau khi sửa `Code.gs`
+
+Apps Script chỉ phục vụ phiên bản đã deploy. Mỗi lần dán code mới phải:
+**Deploy → Manage deployments → (biểu tượng bút chì) → Version: New version → Deploy**.
+URL Web App giữ nguyên, không cần build lại client.

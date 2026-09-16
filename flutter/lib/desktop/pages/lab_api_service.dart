@@ -10,9 +10,9 @@ class LabConfig {
   static const String _envSharedSecret =
       String.fromEnvironment('LAB_SHARED_SECRET', defaultValue: 'your-secret-key-here');
   static const String _envMachineId =
-      String.fromEnvironment('LAB_MACHINE_ID', defaultValue: '100.83.83.70');
+      String.fromEnvironment('LAB_MACHINE_ID', defaultValue: '');
   static const String _envMachinePassword =
-      String.fromEnvironment('LAB_MACHINE_PASSWORD', defaultValue: 'mat_khau_may_lab');
+      String.fromEnvironment('LAB_MACHINE_PASSWORD', defaultValue: '');
 
   static String? _overrideApiUrl;
   static String? _overrideSharedSecret;
@@ -43,16 +43,23 @@ class LabConfig {
     return File('$home/.labdesk_config.json');
   }
 
+  // An empty value in the file must not shadow a value baked in at build time,
+  // otherwise a stale admin config silently bricks a correctly built client.
+  static String? _override(Object? value) {
+    final s = value is String ? value.trim() : '';
+    return s.isEmpty ? null : s;
+  }
+
   static void loadLocalConfig() {
     try {
       final f = _configFile;
       if (f.existsSync()) {
         final data =
             jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
-        _overrideApiUrl = data['api_url'] as String?;
-        _overrideSharedSecret = data['shared_secret'] as String?;
-        _overrideMachineId = data['machine_id'] as String?;
-        _overrideMachinePassword = data['machine_password'] as String?;
+        _overrideApiUrl = _override(data['api_url']);
+        _overrideSharedSecret = _override(data['shared_secret']);
+        _overrideMachineId = _override(data['machine_id']);
+        _overrideMachinePassword = _override(data['machine_password']);
       }
     } catch (_) {}
   }
@@ -63,11 +70,11 @@ class LabConfig {
     String? machineId,
     String? machinePassword,
   }) {
-    _overrideApiUrl = apiUrl.trim();
-    _overrideSharedSecret = sharedSecret.trim();
-    if (machineId != null) _overrideMachineId = machineId.trim();
+    _overrideApiUrl = _override(apiUrl);
+    _overrideSharedSecret = _override(sharedSecret);
+    if (machineId != null) _overrideMachineId = _override(machineId);
     if (machinePassword != null) {
-      _overrideMachinePassword = machinePassword.trim();
+      _overrideMachinePassword = _override(machinePassword);
     }
 
     try {
@@ -100,6 +107,10 @@ class LoginResult {
   });
 
   factory LoginResult.fromJson(Map<String, dynamic> json) {
+    if (json['allowed'] == null && json['error'] != null) {
+      return LoginResult.error(
+          'Hệ thống phòng lab đang bận hoặc chưa sẵn sàng. Vui lòng liên hệ Quản trị viên.');
+    }
     return LoginResult(
       allowed: json['allowed'] == true,
       sessionToken: json['session_token'] as String?,
