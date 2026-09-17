@@ -504,8 +504,12 @@ class _AppState extends State<App> with WidgetsBindingObserver {
               : (isWeb
                   ? '${bind.mainGetAppNameSync()} Web Client V2 (Preview)'
                   : bind.mainGetAppNameSync()),
-          theme: MyTheme.lightTheme,
-          darkTheme: MyTheme.darkTheme,
+          theme: LabConfig.isLabMode
+              ? _labUiTheme(MyTheme.lightTheme)
+              : MyTheme.lightTheme,
+          darkTheme: LabConfig.isLabMode
+              ? _labUiTheme(MyTheme.darkTheme)
+              : MyTheme.darkTheme,
           themeMode: MyTheme.currentThemeMode(),
           home: isDesktop
               ? (LabConfig.isLabMode
@@ -550,6 +554,24 @@ class _AppState extends State<App> with WidgetsBindingObserver {
       );
     });
   }
+}
+
+// LabDesk uses each OS's own native UI font instead of Flutter's bundled
+// Roboto, so the app matches the look of native apps (Apple's SF Pro on
+// macOS, Segoe UI Variable on Windows 11+) rather than looking foreign on
+// every platform. These are system font *references*, not embedded font
+// files, so there's no redistribution/licensing concern.
+ThemeData _labUiTheme(ThemeData base) {
+  final fontFamily = Platform.isMacOS ? '.SF Pro Text' : 'Segoe UI Variable';
+  final fallback = Platform.isMacOS
+      ? const ['.AppleSystemUIFont', 'Helvetica Neue']
+      : const ['Segoe UI', 'Roboto'];
+  return base.copyWith(
+    textTheme: base.textTheme.apply(
+      fontFamily: fontFamily,
+      fontFamilyFallback: fallback,
+    ),
+  );
 }
 
 Widget _keepScaleBuilder(BuildContext context, Widget? child) {
