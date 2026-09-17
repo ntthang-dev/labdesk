@@ -385,6 +385,18 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
               color: isDark ? Colors.white60 : Colors.black54,
             ),
           ),
+          const SizedBox(height: 10),
+          // A first-time student has no other instructions in front of them
+          // (no README, no settings screen) - this line is the entire manual.
+          Text(
+            'Nhập đúng Họ tên và MSSV như trong danh sách lớp, hệ thống sẽ tự kết nối vào máy phòng Lab.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12.5,
+              height: 1.4,
+              color: isDark ? Colors.white54 : Colors.black45,
+            ),
+          ),
           const SizedBox(height: 24),
 
           // Full Name field
@@ -449,12 +461,29 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
                       color: Colors.red, size: 20),
                   const SizedBox(width: 8),
                   Expanded(
-                    child: Text(
-                      _errorMessage!,
-                      style: const TextStyle(
-                        color: Colors.red,
-                        fontSize: 13,
-                      ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          _errorMessage!,
+                          style: const TextStyle(
+                            color: Colors.red,
+                            fontSize: 13,
+                          ),
+                        ),
+                        if (LabConfig.supportContact.isNotEmpty) ...[
+                          const SizedBox(height: 6),
+                          Text(
+                            'Cần hỗ trợ? Liên hệ: ${LabConfig.supportContact}',
+                            style: TextStyle(
+                              color: Colors.red.withOpacity(0.75),
+                              fontSize: 12,
+                              fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ],
+                      ],
                     ),
                   ),
                 ],

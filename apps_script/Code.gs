@@ -181,7 +181,7 @@ function doGet(e) {
 function handleLogin(body) {
   const { student_id, full_name } = body;
   if (!student_id || !full_name) {
-    return jsonResponse({ allowed: false, reason: 'Missing student_id or full_name' });
+    return jsonResponse({ allowed: false, reason: 'Vui lòng nhập đầy đủ họ tên và MSSV.' });
   }
 
   // (Optional) Check Students whitelist
@@ -196,11 +196,11 @@ function handleLogin(body) {
         const found = students.slice(1).find(r => String(r[idCol]).trim() === String(student_id).trim());
         if (!found) {
           writeAuditLog(student_id, '', 'login_denied', 'Student not in whitelist');
-          return jsonResponse({ allowed: false, reason: 'Student ID not recognized' });
+          return jsonResponse({ allowed: false, reason: 'MSSV không có trong danh sách. Vui lòng liên hệ Quản trị viên.' });
         }
         if (statusCol !== -1 && String(found[statusCol]).trim().toLowerCase() === 'suspended') {
           writeAuditLog(student_id, '', 'login_denied', 'Student suspended');
-          return jsonResponse({ allowed: false, reason: 'Account suspended' });
+          return jsonResponse({ allowed: false, reason: 'Tài khoản của bạn đã bị tạm khoá. Vui lòng liên hệ Quản trị viên.' });
         }
       }
     }
@@ -213,7 +213,7 @@ function handleLogin(body) {
   const sessSheet = getSheet('ActiveSessions');
   const sessData = sessSheet.getDataRange().getValues();
   if (sessData.length < 2) {
-    return jsonResponse({ allowed: false, reason: 'No machines configured' });
+    return jsonResponse({ allowed: false, reason: 'Hệ thống phòng lab chưa sẵn sàng. Vui lòng liên hệ Quản trị viên.' });
   }
   const sessHeaders = sessData[0];
   const sidCol = sessHeaders.indexOf('student_id');
@@ -225,9 +225,10 @@ function handleLogin(body) {
         String(sessData[r][statusCol]).trim().toLowerCase() === 'occupied') {
       const occupiedMachine = sessData[r][machineIdCol];
       writeAuditLog(student_id, occupiedMachine, 'login_denied', 'Already has active session');
+      // The audit log keeps the machine id for the admin; the student never needs it.
       return jsonResponse({
         allowed: false,
-        reason: 'You already have an active session on machine ' + occupiedMachine
+        reason: 'Bạn đang có một phiên đăng nhập khác chưa đăng xuất. Vui lòng đăng xuất phiên cũ trước.'
       });
     }
   }
@@ -243,7 +244,7 @@ function handleLogin(body) {
           writeAuditLog(student_id, body.machine_id, 'login_denied', 'Machine occupied by ' + occupant);
           return jsonResponse({
             allowed: false,
-            reason: 'Machine ' + body.machine_id + ' is currently in use'
+            reason: 'Máy này hiện đang có người sử dụng. Vui lòng thử lại sau.'
           });
         }
         targetRow = { row: r + 1, data: {}, headers: sessHeaders };
@@ -259,7 +260,7 @@ function handleLogin(body) {
 
   if (!targetRow) {
     writeAuditLog(student_id, body.machine_id || '', 'login_denied', 'No free machine');
-    return jsonResponse({ allowed: false, reason: 'No machine available' });
+    return jsonResponse({ allowed: false, reason: 'Hiện không còn máy trống. Vui lòng thử lại sau.' });
   }
 
   // Allocate the session

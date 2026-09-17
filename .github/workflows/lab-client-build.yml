@@ -19,6 +19,10 @@ on:
         description: "Fallback lab machine password (normally served by the Sheets row)"
         required: false
         type: string
+      support_contact:
+        description: "Contact shown to a stuck student (e.g. an email or phone number)"
+        required: false
+        type: string
   push:
     tags:
       - "v*"
@@ -133,6 +137,7 @@ jobs:
           INPUT_SECRET: ${{ inputs.shared_secret || secrets.LAB_SHARED_SECRET }}
           INPUT_MACHINE_ID: ${{ inputs.machine_id || secrets.LAB_MACHINE_ID }}
           INPUT_MACHINE_PASSWORD: ${{ inputs.machine_password || secrets.LAB_MACHINE_PASSWORD }}
+          INPUT_SUPPORT_CONTACT: ${{ inputs.support_contact || secrets.LAB_SUPPORT_CONTACT }}
         run: |
           set -e
           if [ -z "$INPUT_API_URL" ] || [ -z "$INPUT_SECRET" ]; then
@@ -147,6 +152,9 @@ jobs:
           fi
           if [ -n "$INPUT_MACHINE_PASSWORD" ]; then
             DEFINES="$DEFINES --dart-define=LAB_MACHINE_PASSWORD=$INPUT_MACHINE_PASSWORD"
+          fi
+          if [ -n "$INPUT_SUPPORT_CONTACT" ]; then
+            DEFINES="$DEFINES --dart-define=LAB_SUPPORT_CONTACT=\"$INPUT_SUPPORT_CONTACT\""
           fi
           export FLUTTER_BUILD_ARGS="$DEFINES"
 
@@ -277,6 +285,7 @@ jobs:
           INPUT_SECRET: ${{ inputs.shared_secret || secrets.LAB_SHARED_SECRET }}
           INPUT_MACHINE_ID: ${{ inputs.machine_id || secrets.LAB_MACHINE_ID }}
           INPUT_MACHINE_PASSWORD: ${{ inputs.machine_password || secrets.LAB_MACHINE_PASSWORD }}
+          INPUT_SUPPORT_CONTACT: ${{ inputs.support_contact || secrets.LAB_SUPPORT_CONTACT }}
         run: |
           set -e
           if [ -z "$INPUT_API_URL" ] || [ -z "$INPUT_SECRET" ]; then
@@ -291,6 +300,9 @@ jobs:
           fi
           if [ -n "$INPUT_MACHINE_PASSWORD" ]; then
             DEFINES="$DEFINES --dart-define=LAB_MACHINE_PASSWORD=$INPUT_MACHINE_PASSWORD"
+          fi
+          if [ -n "$INPUT_SUPPORT_CONTACT" ]; then
+            DEFINES="$DEFINES --dart-define=LAB_SUPPORT_CONTACT=\"$INPUT_SUPPORT_CONTACT\""
           fi
           export FLUTTER_BUILD_ARGS="$DEFINES"
 

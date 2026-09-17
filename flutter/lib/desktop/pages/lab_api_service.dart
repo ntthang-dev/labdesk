@@ -13,6 +13,12 @@ class LabConfig {
       String.fromEnvironment('LAB_MACHINE_ID', defaultValue: '');
   static const String _envMachinePassword =
       String.fromEnvironment('LAB_MACHINE_PASSWORD', defaultValue: '');
+  // Shown to a student who is stuck (e.g. MSSV not whitelisted, all machines
+  // busy for a while). Set at build time; there is no safe generic default
+  // ("liên hệ quản trị viên" alone isn't actionable), so this stays empty
+  // unless the admin supplies one.
+  static const String supportContact =
+      String.fromEnvironment('LAB_SUPPORT_CONTACT', defaultValue: '');
 
   static String? _overrideApiUrl;
   static String? _overrideSharedSecret;
