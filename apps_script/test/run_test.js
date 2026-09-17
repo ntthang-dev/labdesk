@@ -265,5 +265,49 @@ console.log('=== 10. Remote forced-update gate (Config sheet, optional) ===');
       JSON.stringify(noVersionRes));
 }
 
+console.log('=== 11. Admin Sheets menu (Kick / Suspend / Unsuspend selected row) ===');
+{
+  const sheets = freshSheets();
+  const login = (() => {
+    const sb0 = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+    return call(sb0, 'doPost', {
+      postData: { contents: JSON.stringify({ action: 'login', student_id: 'k1', full_name: 'Kick Target', secret: 'S3CR3T' }) },
+    });
+  })();
+  check('setup: login allocated the machine', login.allowed === true, JSON.stringify(login));
+
+  const { sandbox, alerts, activeState } = buildSandbox({ sharedSecret: 'S3CR3T', sheets, active: { sheetName: 'ActiveSessions', row: 2 } });
+  const sb = loadCode(sandbox, CODE_PATH);
+
+  sb.adminKickSelectedRow();
+  check('admin menu: kick alert shown', alerts.length === 1 && alerts[0].indexOf('Kick Target') !== -1, JSON.stringify(alerts));
+  const headers = sheets.ActiveSessions.headers;
+  check('admin menu: kick sets admin_action', sheets.ActiveSessions.rows[0][headers.indexOf('admin_action')] === 'kick');
+
+  // Wrong sheet selected -> refuses instead of guessing.
+  activeState.sheetName = 'AuditLog';
+  activeState.row = 2;
+  alerts.length = 0;
+  sb.adminKickSelectedRow();
+  check('admin menu: refuses to act on the wrong sheet', alerts.length === 1 && alerts[0].indexOf('ActiveSessions') !== -1, JSON.stringify(alerts));
+}
+{
+  const sheets = freshSheets();
+  sheets.Students = new FakeSheet(['student_id', 'full_name', 'status'], [['5', 'Some Student', 'active']]);
+  const { sandbox, alerts, activeState } = buildSandbox({ sharedSecret: 'S3CR3T', sheets, active: { sheetName: 'Students', row: 2 } });
+  const sb = loadCode(sandbox, CODE_PATH);
+
+  sb.adminSuspendSelectedStudent();
+  check('admin menu: suspend sets status', sheets.Students.rows[0][2] === 'suspended', JSON.stringify(sheets.Students.rows));
+  check('admin menu: suspend alert shown', alerts.length === 1);
+
+  alerts.length = 0;
+  sb.adminUnsuspendSelectedStudent();
+  check('admin menu: unsuspend sets status back to active', sheets.Students.rows[0][2] === 'active');
+
+  // Suspending a student via the menu is enforced by the same login() check
+  // already covered in test 6 - not re-tested here to avoid duplicating it.
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

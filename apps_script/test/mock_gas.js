@@ -15,10 +15,17 @@ class FakeSheet {
   }
   getLastColumn() { return this.headers.length; }
   getRange(a, b, c, d) {
-    // getRange(1,1,1,lastCol) -> header row read; getRange(row, col) -> single cell write
+    // getRange(1,1,1,lastCol) -> header row read; getRange(row,1,1,N) -> data
+    // row read (row > 1); getRange(row, col) -> single cell write.
     if (c !== undefined && d !== undefined) {
-      const rowIdx = a - 1;
-      return { getValues: () => [this.headers.slice(b - 1, b - 1 + d)] };
+      const self = this;
+      return {
+        getValues: () => {
+          if (a === 1) return [self.headers.slice(b - 1, b - 1 + d)];
+          const dataRow = self.rows[a - 2] || [];
+          return [dataRow.slice(b - 1, b - 1 + d)];
+        },
+      };
     }
     const rowIdx = a - 1;
     const colIdx = b - 1;
@@ -39,9 +46,16 @@ class FakeSheet {
   appendRow(row) { this.rows.push(row.slice()); }
 }
 
-function buildSandbox({ sharedSecret, sheets }) {
+function buildSandbox({ sharedSecret, sheets, active }) {
   const props = { SHARED_SECRET: sharedSecret };
-  const auditLog = [];
+  const alerts = [];
+  // `active` = { sheetName, row } - what the fake "admin cursor" is on,
+  // mirroring getActiveSheet()/getActiveRange() in the real Sheets UI.
+  const activeState = active || { sheetName: null, row: 0 };
+  const ui = {
+    ButtonSet: { OK: 'OK' },
+    alert: (...args) => { alerts.push(args.join(' | ')); },
+  };
 
   const sandbox = {
     console,
@@ -54,6 +68,16 @@ function buildSandbox({ sharedSecret, sheets }) {
       getActiveSpreadsheet: () => ({
         getSheetByName: (name) => sheets[name] || null,
       }),
+      getUi: () => ui,
+      getActiveSheet: () => {
+        const sheet = sheets[activeState.sheetName];
+        if (!sheet) return { getName: () => activeState.sheetName || '' };
+        sheet._name = activeState.sheetName;
+        sheet.getName = () => activeState.sheetName;
+        sheet.getActiveRange = () =>
+          activeState.row ? { getRow: () => activeState.row } : null;
+        return sheet;
+      },
     },
     Utilities: {
       getUuid: () => 'uuid-' + Math.random().toString(36).slice(2, 10),
@@ -76,7 +100,7 @@ function buildSandbox({ sharedSecret, sheets }) {
     isNaN: isNaN,
   };
   sandbox.global = sandbox;
-  return { sandbox, auditLogSheet: () => sheets['AuditLog'] };
+  return { sandbox, alerts, activeState };
 }
 
 function loadCode(sandbox, codePath) {
