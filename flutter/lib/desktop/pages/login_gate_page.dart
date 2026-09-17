@@ -5,6 +5,7 @@ import 'package:flutter_hbb/desktop/pages/lab_api_service.dart';
 import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 typedef ConnectHandler = Future<void> Function(
   BuildContext context,
@@ -30,9 +31,12 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
   String? _activeSessionToken;
   String? _connectedMachineName;
   String? _connectedFullName;
+  String? _connectedMachineId;
+  String? _connectedPassword;
   Timer? _pollTimer;
   DateTime? _connectedAt;
   bool _isViewer = false;
+  String? _updateDownloadUrl; // set when force_update or updateAvailable
 
   @override
   void initState() {
@@ -115,9 +119,12 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       }
 
       _connectedMachineName = result.machineName ?? 'Máy phòng Lab';
+      _connectedMachineId = machineId;
+      _connectedPassword = password;
       // The roster name, not the (possibly mistyped) one in the text field.
       _connectedFullName = result.fullName ?? _nameController.text.trim();
       _isViewer = result.isViewOnly;
+      _updateDownloadUrl = result.updateAvailable ? result.downloadUrl : null;
 
       // `view-only` is a per-peer setting RustDesk itself enforces (blocks
       // sending keyboard/mouse before the first frame - see
@@ -158,6 +165,8 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       setState(() {
         _isLoading = false;
         _errorMessage = result.reason ?? 'Đăng nhập bị từ chối';
+        _updateDownloadUrl =
+            result.forceUpdate ? result.downloadUrl : null;
       });
     }
   }
@@ -264,6 +273,90 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
         _isLoading = false;
       });
     }
+  }
+
+  // RustDesk's file transfer engine (chunked transfer, resume, path-traversal
+  // protection) is unmodified and already safe under lab mode - the file
+  // manager window's title/tab go through the same getWindowNameWithId /
+  // DesktopTab.tablabelGetter this file already gated in 02949cbda/b48682f84,
+  // so it never shows the host's id. This just gives it a visible entry
+  // point, since students have no other way to find "Transfer file" (it's
+  // buried in the remote toolbar's Control Actions menu).
+  Future<void> _openFileTransfer() async {
+    final machineId = _connectedMachineId;
+    if (machineId == null) return;
+    await connect(context, machineId,
+        isFileTransfer: true, password: _connectedPassword);
+  }
+
+  // These are UserDefaultConfig keys (libs/hbb_common/src/config.rs), i.e.
+  // global defaults used for the *next* session - not the live one, which
+  // already has its own toolbar (Display menu) for the same settings.
+  // Setting them here just means a student who reconnects doesn't have to
+  // redo their preference every time.
+  Future<void> _showDisplaySettings(BuildContext context, bool isDark) async {
+    final quality = await bind.mainGetOption(key: 'image_quality');
+    final viewStyle = await bind.mainGetOption(key: 'view_style');
+    if (!mounted) return;
+    await showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Cài đặt hiển thị'),
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text('Chất lượng hình ảnh (áp dụng cho lần kết nối tiếp theo)',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white60 : Colors.black54)),
+            const SizedBox(height: 6),
+            ...[
+              ('best', 'Ưu tiên chất lượng'),
+              ('balanced', 'Cân bằng'),
+              ('low', 'Ưu tiên tốc độ phản hồi'),
+            ].map((opt) => RadioListTile<String>(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(opt.$2),
+                  value: opt.$1,
+                  groupValue: quality.isEmpty ? 'balanced' : quality,
+                  onChanged: (v) async {
+                    if (v == null) return;
+                    await bind.mainSetOption(key: 'image_quality', value: v);
+                    if (ctx.mounted) Navigator.of(ctx).pop();
+                  },
+                )),
+            const Divider(height: 20),
+            Text('Chế độ hiển thị màn hình',
+                style: TextStyle(
+                    fontSize: 12,
+                    color: isDark ? Colors.white60 : Colors.black54)),
+            const SizedBox(height: 6),
+            ...[
+              ('original', 'Kích thước gốc'),
+              ('adaptive', 'Vừa khung cửa sổ'),
+            ].map((opt) => RadioListTile<String>(
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                  title: Text(opt.$2),
+                  value: opt.$1,
+                  groupValue: viewStyle.isEmpty ? 'original' : viewStyle,
+                  onChanged: (v) async {
+                    if (v == null) return;
+                    await bind.mainSetOption(key: 'view_style', value: v);
+                    if (ctx.mounted) Navigator.of(ctx).pop();
+                  },
+                )),
+          ],
+        ),
+        actions: [
+          TextButton(
+              onPressed: () => Navigator.of(ctx).pop(),
+              child: const Text('Đóng')),
+        ],
+      ),
+    );
   }
 
   @override
@@ -403,6 +496,36 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
             ],
           ),
         ),
+        if (!_isViewer && widget.connectHandler == null) ...[
+          const SizedBox(height: 16),
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _isLoading ? null : _openFileTransfer,
+                  icon: const Icon(Icons.folder_open, size: 18),
+                  label: const Text('Truyền file'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: OutlinedButton.icon(
+                  onPressed: _isLoading
+                      ? null
+                      : () => _showDisplaySettings(context, isDark),
+                  icon: const Icon(Icons.tune, size: 18),
+                  label: const Text('Cài đặt'),
+                  style: OutlinedButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(vertical: 12),
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ],
         const SizedBox(height: 28),
         SizedBox(
           width: double.infinity,
@@ -426,7 +549,69 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
                     style: const TextStyle(fontWeight: FontWeight.bold)),
           ),
         ),
+        if ((_updateDownloadUrl ?? '').isNotEmpty) ...[
+          const SizedBox(height: 14),
+          InkWell(
+            onTap: () => launchUrl(Uri.parse(_updateDownloadUrl!),
+                mode: LaunchMode.externalApplication),
+            child: Text(
+              '🔔 Có bản LabDesk mới hơn — bấm để tải',
+              style: TextStyle(
+                color: isDark ? Colors.white54 : Colors.black45,
+                fontSize: 12,
+                decoration: TextDecoration.underline,
+              ),
+            ),
+          ),
+        ],
       ],
+    );
+  }
+
+  Widget _buildUserGuide(bool isDark) {
+    const steps = [
+      '1. Nhập đúng Họ tên và MSSV như trong danh sách lớp.',
+      '2. Bấm "Đăng nhập vào phòng Lab" — hệ thống tự kết nối, không cần nhập gì thêm.',
+      '3. Nếu máy đang có người dùng, bạn sẽ được vào ở chế độ chỉ xem (không điều khiển được).',
+      '4. Trong phiên: nút "Truyền file" để chuyển file qua lại; nút "Cài đặt" để đổi chất lượng hình ảnh.',
+      '5. Xong việc, bấm "Ngắt kết nối & Đăng xuất" để nhường máy cho bạn khác — đừng chỉ đóng cửa sổ.',
+      'macOS: nếu hệ thống báo "không thể mở vì không xác định được nhà phát triển", vào System Settings → Privacy & Security → cuộn xuống → bấm "Open Anyway".',
+    ];
+    return Theme(
+      data: Theme.of(context).copyWith(dividerColor: Colors.transparent),
+      child: ExpansionTile(
+        tilePadding: EdgeInsets.zero,
+        childrenPadding: const EdgeInsets.only(bottom: 8),
+        title: Text(
+          '📘 Hướng dẫn sử dụng',
+          style: TextStyle(
+            fontSize: 12.5,
+            fontWeight: FontWeight.w600,
+            color: isDark ? Colors.white70 : Colors.black54,
+          ),
+        ),
+        children: [
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: steps
+                  .map((s) => Padding(
+                        padding: const EdgeInsets.only(bottom: 6),
+                        child: Text(
+                          s,
+                          style: TextStyle(
+                            fontSize: 12,
+                            height: 1.4,
+                            color: isDark ? Colors.white60 : Colors.black54,
+                          ),
+                        ),
+                      ))
+                  .toList(),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -471,6 +656,14 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
               color: isDark ? Colors.white60 : Colors.black54,
             ),
           ),
+          const SizedBox(height: 4),
+          Text(
+            'Phiên bản ${LabConfig.appVersion}',
+            style: TextStyle(
+              fontSize: 10.5,
+              color: isDark ? Colors.white38 : Colors.black38,
+            ),
+          ),
           const SizedBox(height: 10),
           // A first-time student has no other instructions in front of them
           // (no README, no settings screen) - this line is the entire manual.
@@ -483,7 +676,9 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
               color: isDark ? Colors.white54 : Colors.black45,
             ),
           ),
-          const SizedBox(height: 24),
+          const SizedBox(height: 4),
+          _buildUserGuide(isDark),
+          const SizedBox(height: 20),
 
           // Full Name field
           TextFormField(
@@ -566,6 +761,20 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
                               color: Colors.red.withOpacity(0.75),
                               fontSize: 12,
                               fontStyle: FontStyle.italic,
+                            ),
+                          ),
+                        ],
+                        if ((_updateDownloadUrl ?? '').isNotEmpty) ...[
+                          const SizedBox(height: 10),
+                          OutlinedButton.icon(
+                            onPressed: () => launchUrl(
+                                Uri.parse(_updateDownloadUrl!),
+                                mode: LaunchMode.externalApplication),
+                            icon: const Icon(Icons.download, size: 16),
+                            label: const Text('Tải bản mới nhất'),
+                            style: OutlinedButton.styleFrom(
+                              foregroundColor: Colors.red,
+                              side: const BorderSide(color: Colors.red),
                             ),
                           ),
                         ],

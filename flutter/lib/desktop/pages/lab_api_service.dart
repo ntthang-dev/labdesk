@@ -20,6 +20,13 @@ class LabConfig {
   static const String supportContact =
       String.fromEnvironment('LAB_SUPPORT_CONTACT', defaultValue: '');
 
+  // This build's own version, independent of the RustDesk core version
+  // (bind.mainGetVersion() reads Cargo.toml, which this fork doesn't bump
+  // per LabDesk-side change). Compared against Config!min_version /
+  // latest_version in Code.gs - see handleLogin's force_update gate.
+  static const String appVersion =
+      String.fromEnvironment('LAB_APP_VERSION', defaultValue: '1.0.0');
+
   static String? _overrideApiUrl;
   static String? _overrideSharedSecret;
   static String? _overrideMachineId;
@@ -110,8 +117,29 @@ class LoginResult {
   // The roster's own name (Students sheet), not what the student typed -
   // Code.gs overrides it whenever the whitelist matches.
   final String? fullName;
+  final bool forceUpdate;
+  final String? downloadUrl;
+  final String? latestVersion;
 
   bool get isViewOnly => mode == 'view';
+  bool get updateAvailable =>
+      latestVersion != null &&
+      latestVersion!.isNotEmpty &&
+      _isVersionOlder(LabConfig.appVersion, latestVersion!);
+
+  // Mirrors Code.gs' compareVersions(): dot-separated numeric segments,
+  // unparseable ones count as 0. Keeps the two version checks (force_update
+  // server-side, "update available" banner client-side) consistent.
+  static bool _isVersionOlder(String a, String b) {
+    final pa = a.split('.').map((s) => int.tryParse(s) ?? 0).toList();
+    final pb = b.split('.').map((s) => int.tryParse(s) ?? 0).toList();
+    for (var i = 0; i < (pa.length > pb.length ? pa.length : pb.length); i++) {
+      final va = i < pa.length ? pa[i] : 0;
+      final vb = i < pb.length ? pb[i] : 0;
+      if (va != vb) return va < vb;
+    }
+    return false;
+  }
 
   LoginResult({
     required this.allowed,
@@ -122,6 +150,9 @@ class LoginResult {
     this.reason,
     this.mode,
     this.fullName,
+    this.forceUpdate = false,
+    this.downloadUrl,
+    this.latestVersion,
   });
 
   factory LoginResult.fromJson(Map<String, dynamic> json) {
@@ -138,6 +169,9 @@ class LoginResult {
       reason: json['reason'] as String?,
       mode: json['mode'] as String?,
       fullName: json['full_name'] as String?,
+      forceUpdate: json['force_update'] == true,
+      downloadUrl: json['download_url'] as String?,
+      latestVersion: json['latest_version'] as String?,
     );
   }
 
@@ -247,6 +281,7 @@ class LabApiService {
           'student_id': studentId,
           'full_name': fullName,
           'secret': LabConfig.sharedSecret,
+          'client_version': LabConfig.appVersion,
         }),
       );
 

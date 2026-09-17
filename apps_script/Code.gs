@@ -119,6 +119,37 @@ function reapStaleSessions() {
   return changed;
 }
 
+// Optional `Config` sheet (key | value, 2 columns, 1 row per key) for
+// settings an admin wants to change without redeploying: min_version,
+// latest_version, download_url so far. Sheet may not exist at all -
+// callers get {} and every feature that reads from it just no-ops.
+function readConfig() {
+  const sheet = getSheet('Config');
+  if (!sheet) return {};
+  const data = sheet.getDataRange().getValues();
+  const config = {};
+  for (let r = 0; r < data.length; r++) {
+    const key = String(data[r][0] || '').trim();
+    if (key) config[key] = String(data[r][1] || '').trim();
+  }
+  return config;
+}
+
+// Compares dot-separated numeric versions ("1.2.0" vs "1.10.0"). Returns
+// negative/0/positive like a normal comparator. Unparseable segments count
+// as 0, so a malformed Config value fails open (never blocks login) rather
+// than throwing.
+function compareVersions(a, b) {
+  const pa = String(a || '0').split('.').map(n => parseInt(n, 10) || 0);
+  const pb = String(b || '0').split('.').map(n => parseInt(n, 10) || 0);
+  const len = Math.max(pa.length, pb.length);
+  for (let i = 0; i < len; i++) {
+    const diff = (pa[i] || 0) - (pb[i] || 0);
+    if (diff !== 0) return diff;
+  }
+  return 0;
+}
+
 // ----- API handlers -----
 
 function doPost(e) {
@@ -189,6 +220,22 @@ function handleLogin(body) {
   let full_name = body.full_name;
   if (!student_id || !full_name) {
     return jsonResponse({ allowed: false, reason: 'Vui lòng nhập đầy đủ họ tên và MSSV.' });
+  }
+
+  // Remote forced-update gate (Config sheet, optional - see readConfig()).
+  // Runs before anything else touches ActiveSessions, so a rejected client
+  // never occupies a machine.
+  const config = readConfig();
+  if (config.min_version && body.client_version &&
+      compareVersions(body.client_version, config.min_version) < 0) {
+    writeAuditLog(student_id, '', 'login_denied',
+        'Client version ' + body.client_version + ' below min ' + config.min_version);
+    return jsonResponse({
+      allowed: false,
+      force_update: true,
+      download_url: config.download_url || '',
+      reason: 'Phiên bản LabDesk này đã cũ, cần cập nhật bản mới trước khi đăng nhập.'
+    });
   }
 
   // (Optional) Check Students whitelist
@@ -292,7 +339,9 @@ function handleLogin(body) {
         machine_id: machineId,
         machine_name: occupiedFallback.data['machine_name'] || machineId,
         machine_pass: occupiedFallback.data['machine_pass'] || '',
-        full_name: full_name
+        full_name: full_name,
+        latest_version: config.latest_version || '',
+        download_url: config.download_url || ''
       });
     }
     writeAuditLog(student_id, body.machine_id || '', 'login_denied', 'No free machine');
@@ -320,7 +369,9 @@ function handleLogin(body) {
     machine_pass: targetRow.data['machine_pass'] || '',
     // The roster name (already overridden from Students above), so the client
     // shows the official name rather than whatever was typed at login.
-    full_name: full_name
+    full_name: full_name,
+    latest_version: config.latest_version || '',
+    download_url: config.download_url || ''
   });
 }
 

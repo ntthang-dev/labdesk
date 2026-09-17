@@ -23,6 +23,10 @@ on:
         description: "Contact shown to a stuck student (e.g. an email or phone number)"
         required: false
         type: string
+      app_version:
+        description: "LabDesk app version string shown in-app and compared against Config!min_version (default 1.0.0)"
+        required: false
+        type: string
   push:
     tags:
       - "v*"
@@ -138,6 +142,7 @@ jobs:
           INPUT_MACHINE_ID: ${{ inputs.machine_id || secrets.LAB_MACHINE_ID }}
           INPUT_MACHINE_PASSWORD: ${{ inputs.machine_password || secrets.LAB_MACHINE_PASSWORD }}
           INPUT_SUPPORT_CONTACT: ${{ inputs.support_contact || secrets.LAB_SUPPORT_CONTACT }}
+          INPUT_APP_VERSION: ${{ inputs.app_version || vars.LAB_APP_VERSION }}
         run: |
           set -e
           if [ -z "$INPUT_API_URL" ] || [ -z "$INPUT_SECRET" ]; then
@@ -155,6 +160,9 @@ jobs:
           fi
           if [ -n "$INPUT_SUPPORT_CONTACT" ]; then
             DEFINES="$DEFINES --dart-define=LAB_SUPPORT_CONTACT=\"$INPUT_SUPPORT_CONTACT\""
+          fi
+          if [ -n "$INPUT_APP_VERSION" ]; then
+            DEFINES="$DEFINES --dart-define=LAB_APP_VERSION=$INPUT_APP_VERSION"
           fi
           export FLUTTER_BUILD_ARGS="$DEFINES"
 
@@ -286,6 +294,7 @@ jobs:
           INPUT_MACHINE_ID: ${{ inputs.machine_id || secrets.LAB_MACHINE_ID }}
           INPUT_MACHINE_PASSWORD: ${{ inputs.machine_password || secrets.LAB_MACHINE_PASSWORD }}
           INPUT_SUPPORT_CONTACT: ${{ inputs.support_contact || secrets.LAB_SUPPORT_CONTACT }}
+          INPUT_APP_VERSION: ${{ inputs.app_version || vars.LAB_APP_VERSION }}
         run: |
           set -e
           if [ -z "$INPUT_API_URL" ] || [ -z "$INPUT_SECRET" ]; then
@@ -303,6 +312,9 @@ jobs:
           fi
           if [ -n "$INPUT_SUPPORT_CONTACT" ]; then
             DEFINES="$DEFINES --dart-define=LAB_SUPPORT_CONTACT=\"$INPUT_SUPPORT_CONTACT\""
+          fi
+          if [ -n "$INPUT_APP_VERSION" ]; then
+            DEFINES="$DEFINES --dart-define=LAB_APP_VERSION=$INPUT_APP_VERSION"
           fi
           export FLUTTER_BUILD_ARGS="$DEFINES"
 

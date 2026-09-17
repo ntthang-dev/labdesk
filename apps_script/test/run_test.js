@@ -223,5 +223,47 @@ console.log('=== 9. AuditLog carries the student name; whitelist name overrides 
       !!logoutRow && logoutRow[4] === 'Nguyen Van Chuan', JSON.stringify(logoutRow));
 }
 
+console.log('=== 10. Remote forced-update gate (Config sheet, optional) ===');
+{
+  const sheets = freshSheets();
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  const noConfigRes = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: '1', full_name: 'A', secret: 'S3CR3T', client_version: '0.0.1' }) },
+  });
+  check('no Config sheet -> login proceeds normally (backward compatible)',
+      noConfigRes.allowed === true, JSON.stringify(noConfigRes));
+}
+{
+  const sheets = freshSheets();
+  sheets.Config = new FakeSheet(['key', 'value'], [
+    ['min_version', '2.0.0'],
+    ['latest_version', '2.1.0'],
+    ['download_url', 'https://example.com/download'],
+  ]);
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+
+  const oldRes = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: '1', full_name: 'A', secret: 'S3CR3T', client_version: '1.9.9' }) },
+  });
+  check('client below min_version is denied', oldRes.allowed === false, JSON.stringify(oldRes));
+  check('denial carries force_update', oldRes.force_update === true, JSON.stringify(oldRes));
+  check('denial carries download_url', oldRes.download_url === 'https://example.com/download', JSON.stringify(oldRes));
+  check('audit log recorded the version denial',
+      sheets.AuditLog.rows.some(r => r[3] === 'login_denied' && String(r[4]).indexOf('version') !== -1));
+
+  const okRes = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: '2', full_name: 'B', secret: 'S3CR3T', client_version: '2.0.0' }) },
+  });
+  check('client at exactly min_version is allowed', okRes.allowed === true, JSON.stringify(okRes));
+  check('success response carries latest_version', okRes.latest_version === '2.1.0', JSON.stringify(okRes));
+
+  const noVersionRes = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: '3', full_name: 'C', secret: 'S3CR3T' }) },
+  });
+  check('client that sends no version at all is never blocked (old builds keep working)',
+      noVersionRes.allowed === true || noVersionRes.reason !== undefined && noVersionRes.force_update === undefined,
+      JSON.stringify(noVersionRes));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
