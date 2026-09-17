@@ -495,5 +495,27 @@ console.log('=== 15. Multi-machine: adding more ActiveSessions rows just works, 
       sheets.ActiveSessions.rows[1][headers.indexOf('student_id')] === 's2');
 }
 
+console.log('=== 16. Trailing/leading whitespace in sheet cells never reaches the client ===');
+{
+  const sheets = freshSheets();
+  // Mirrors a real production sheet: a stray space typed into machine_id.
+  sheets.ActiveSessions.rows[0] = ['100.83.83.70 ', ' PC Lab 01', 'free', '', '', '', '', '', ' PTNhtd@2026 '];
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+
+  const res = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: '1', full_name: 'A', secret: 'S3CR3T' }) },
+  });
+  check('machine_id trimmed', res.machine_id === '100.83.83.70', JSON.stringify(res));
+  check('machine_name trimmed', res.machine_name === 'PC Lab 01', JSON.stringify(res));
+  check('machine_pass trimmed', res.machine_pass === 'PTNhtd@2026', JSON.stringify(res));
+
+  console.log('  -- 16a. same whitespace, view-mode response path --');
+  const res2 = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: '2', full_name: 'B', secret: 'S3CR3T' }) },
+  });
+  check('view-mode machine_id also trimmed', res2.machine_id === '100.83.83.70', JSON.stringify(res2));
+  check('view-mode machine_pass also trimmed', res2.machine_pass === 'PTNhtd@2026', JSON.stringify(res2));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

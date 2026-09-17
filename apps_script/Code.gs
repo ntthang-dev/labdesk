@@ -436,7 +436,12 @@ function handleLogin(body) {
 
   if (!targetRow) {
     if (occupiedFallback && occupiedFallback.data['session_token']) {
-      const machineId = occupiedFallback.data['machine_id'];
+      // Sheets data entry is human-typed and easy to leave a stray leading/
+      // trailing space in (this is exactly how a real spreadsheet had one on
+      // machine_id) - trimmed here since a space in an IP the client passes
+      // straight to RustDesk's connect(), or in a password, silently breaks
+      // the connection with no useful error.
+      const machineId = String(occupiedFallback.data['machine_id'] || '').trim();
       const controllerName = occupiedFallback.data['full_name'] || occupiedFallback.data['student_id'];
       writeAuditLog(student_id, machineId, 'view_joined',
           full_name + ' joined as viewer (controller: ' + controllerName + ')');
@@ -449,8 +454,8 @@ function handleLogin(body) {
         // too, with zero schema changes.
         session_token: occupiedFallback.data['session_token'],
         machine_id: machineId,
-        machine_name: occupiedFallback.data['machine_name'] || machineId,
-        machine_pass: occupiedFallback.data['machine_pass'] || '',
+        machine_name: String(occupiedFallback.data['machine_name'] || machineId).trim(),
+        machine_pass: String(occupiedFallback.data['machine_pass'] || '').trim(),
         full_name: full_name,
         latest_version: config.latest_version || '',
         download_url: config.download_url || '',
@@ -467,7 +472,7 @@ function handleLogin(body) {
 
   // Allocate the session
   const token = generateToken();
-  const machineId = targetRow.data['machine_id'];
+  const machineId = String(targetRow.data['machine_id'] || '').trim();
   setSessionCell(targetRow.row, sessHeaders, 'status', 'occupied');
   setSessionCell(targetRow.row, sessHeaders, 'student_id', student_id);
   setSessionCell(targetRow.row, sessHeaders, 'full_name', full_name);
@@ -496,8 +501,8 @@ function handleLogin(body) {
     allowed: true,
     session_token: token,
     machine_id: machineId,
-    machine_name: targetRow.data['machine_name'] || machineId,
-    machine_pass: targetRow.data['machine_pass'] || '',
+    machine_name: String(targetRow.data['machine_name'] || machineId).trim(),
+    machine_pass: String(targetRow.data['machine_pass'] || '').trim(),
     // The roster name (already overridden from Students above), so the client
     // shows the official name rather than whatever was typed at login.
     full_name: full_name,
