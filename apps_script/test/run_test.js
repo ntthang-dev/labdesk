@@ -581,5 +581,111 @@ console.log('=== 18. Feedback (self-creating sheet, no lock contention with logi
   check('wrong secret rejected even for feedback', bad.error === 'unauthorized', JSON.stringify(bad));
 }
 
+console.log('=== 19. Scheduling: slot generation ===');
+{
+  const sheets = freshSheets();
+  sheets.Config = new FakeSheet(['key', 'value'], [
+    ['slot_start_hour', '7'], ['slot_end_hour', '19'], ['slot_duration_minutes', '120'],
+  ]);
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  const slots = sb.getSlotsForDay(sb.readConfig());
+  check('7am-7pm in 2h blocks makes 6 slots', slots.length === 6, JSON.stringify(slots));
+  check('first slot starts at 07:00', slots[0] === '07:00-09:00', JSON.stringify(slots));
+  check('last slot ends at 19:00', slots[5] === '17:00-19:00', JSON.stringify(slots));
+}
+
+console.log('=== 20. Scheduling: book / double-book rejected / availability / cancel ===');
+{
+  const sheets = freshSheets();
+  sheets.Config = new FakeSheet(['key', 'value'], [
+    ['slot_start_hour', '7'], ['slot_end_hour', '19'], ['slot_duration_minutes', '120'],
+  ]);
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  const today = new Date().toISOString().slice(0, 10);
+
+  const book1 = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'book', student_id: 's1', full_name: 'A', date: today, time_slot: '09:00-11:00', machine_id: '100.83.83.70', secret: 'S3CR3T' }) },
+  });
+  check('first booking succeeds', book1.success === true, JSON.stringify(book1));
+  check('Schedule sheet auto-created', !!sheets.Schedule);
+
+  console.log('  -- 20a. same machine, same slot, different student -> rejected --');
+  const book2 = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'book', student_id: 's2', full_name: 'B', date: today, time_slot: '09:00-11:00', machine_id: '100.83.83.70', secret: 'S3CR3T' }) },
+  });
+  check('double-booking the same machine/slot rejected', book2.success === false, JSON.stringify(book2));
+
+  console.log('  -- 20b. same student, same slot, different machine -> rejected (one seat per slot) --');
+  const book3 = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'book', student_id: 's1', full_name: 'A', date: today, time_slot: '09:00-11:00', machine_id: 'LAB-02', secret: 'S3CR3T' }) },
+  });
+  check('same student cannot hold two machines in one slot', book3.success === false, JSON.stringify(book3));
+
+  console.log('  -- 20c. invalid slot label rejected --');
+  const badSlot = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'book', student_id: 's3', full_name: 'C', date: today, time_slot: '03:00-05:00', machine_id: 'LAB-02', secret: 'S3CR3T' }) },
+  });
+  check('slot outside operating hours rejected', badSlot.success === false, JSON.stringify(badSlot));
+
+  console.log('  -- 20d. check_availability reflects the booking, with who to contact --');
+  const avail = call(sb, 'doGet', { parameter: { action: 'check_availability', date: today, secret: 'S3CR3T' } });
+  const slot9 = avail.slots.find(s => s.time_slot === '09:00-11:00' && s.machine_id === '100.83.83.70');
+  check('booked slot shows unavailable', slot9 && slot9.available === false, JSON.stringify(slot9));
+  check('booked slot shows who to contact', slot9 && slot9.booked_by === 'A' && slot9.booked_by_student_id === 's1', JSON.stringify(slot9));
+  const freeSlot = avail.slots.find(s => s.time_slot === '11:00-13:00' && s.machine_id === '100.83.83.70');
+  check('other slots still show available', freeSlot && freeSlot.available === true, JSON.stringify(freeSlot));
+
+  console.log('  -- 20e. my_bookings shows the booking --');
+  const mine = call(sb, 'doGet', { parameter: { action: 'my_bookings', student_id: 's1', secret: 'S3CR3T' } });
+  check('my_bookings returns the booking', mine.bookings.length === 1 && mine.bookings[0].time_slot === '09:00-11:00', JSON.stringify(mine));
+
+  console.log('  -- 20f. cancel frees the slot for others --');
+  const cancel = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'cancel_booking', student_id: 's1', date: today, time_slot: '09:00-11:00', machine_id: '100.83.83.70', secret: 'S3CR3T' }) },
+  });
+  check('cancel succeeds', cancel.success === true, JSON.stringify(cancel));
+  const book2Retry = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'book', student_id: 's2', full_name: 'B', date: today, time_slot: '09:00-11:00', machine_id: '100.83.83.70', secret: 'S3CR3T' }) },
+  });
+  check('slot bookable again after cancel', book2Retry.success === true, JSON.stringify(book2Retry));
+}
+
+console.log('=== 21. Scheduling: reserved machine is skipped in login\'s free-machine scan ===');
+{
+  const sheets = freshSheets();
+  sheets.Config = new FakeSheet(['key', 'value'], [
+    ['slot_start_hour', '0'], ['slot_end_hour', '24'], ['slot_duration_minutes', '1440'],
+  ]);
+  const today = new Date().toISOString().slice(0, 10);
+  sheets.Schedule = new FakeSheet(
+    ['date', 'time_slot', 'machine_id', 'student_id', 'full_name', 'status', 'created_at'],
+    [[today, '00:00-24:00', '100.83.83.70', 'reserver', 'Reserver Person', 'booked', '']]
+  );
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+
+  console.log('  -- 21a. a different student walking up does NOT get the reserved machine --');
+  const walkup = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'walkup', full_name: 'Walkup', secret: 'S3CR3T' }) },
+  });
+  check('walk-up student denied the only (reserved) machine',
+      walkup.allowed === false, JSON.stringify(walkup));
+
+  console.log('  -- 21b. the reserving student CAN log in and gets their reserved machine --');
+  const reserver = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'reserver', full_name: 'Reserver Person', secret: 'S3CR3T' }) },
+  });
+  check('the student who reserved it gets in normally',
+      reserver.allowed === true && reserver.machine_id === '100.83.83.70', JSON.stringify(reserver));
+}
+console.log('  -- 21c. no Schedule sheet -> first-come-first-served exactly as before --');
+{
+  const sheets = freshSheets();
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  const res = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: '1', full_name: 'A', secret: 'S3CR3T' }) },
+  });
+  check('login works normally with no Schedule sheet at all', res.allowed === true, JSON.stringify(res));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

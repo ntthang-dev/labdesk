@@ -11,6 +11,15 @@ class FakeSheet {
     this.rows = rows.map(r => r.slice());
   }
   getDataRange() {
+    // A real freshly-inserted Sheet has no synthetic "headers" concept - a
+    // blank sheet has zero rows, and appendRow(['a','b']) puts that literal
+    // text in row 1 like any other row. FakeSheet's `headers` field is only
+    // a convenience for pre-populated fixtures (freshSheets()); an
+    // insertSheet()-created one starts with headers=[] and must NOT inject
+    // a phantom empty row in front of whatever's actually been appended.
+    if (this.headers.length === 0) {
+      return { getValues: () => this.rows.map(r => r.slice()) };
+    }
     return { getValues: () => [this.headers, ...this.rows] };
   }
   getLastColumn() { return this.headers.length; }
