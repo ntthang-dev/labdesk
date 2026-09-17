@@ -744,6 +744,187 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
     );
   }
 
+  String _dateLabel(DateTime d) {
+    const weekdays = ['T2', 'T3', 'T4', 'T5', 'T6', 'T7', 'CN'];
+    return '${weekdays[d.weekday - 1]} ${d.day}/${d.month}';
+  }
+
+  String _isoDate(DateTime d) =>
+      '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
+
+  Future<void> _showBookingDialog(bool isDark) async {
+    final studentId = _studentIdController.text.trim();
+    final fullName = _nameController.text.trim();
+    if (studentId.isEmpty || fullName.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(
+          content: Text('Vui lòng nhập Họ tên và MSSV trước khi đặt lịch.')));
+      return;
+    }
+
+    var selectedDate = DateTime.now();
+    List<TimeSlot> slots = [];
+    List<MyBooking> mine = [];
+    bool loading = true;
+
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) {
+          Future<void> load() async {
+            setDialogState(() => loading = true);
+            final results = await Future.wait([
+              LabApiService.instance.checkAvailability(_isoDate(selectedDate)),
+              LabApiService.instance.myBookings(studentId),
+            ]);
+            if (!ctx.mounted) return;
+            setDialogState(() {
+              slots = results[0] as List<TimeSlot>;
+              mine = results[1] as List<MyBooking>;
+              loading = false;
+            });
+          }
+
+          if (loading && slots.isEmpty) {
+            // First build: kick off the initial load (can't be async in
+            // `builder` itself).
+            WidgetsBinding.instance.addPostFrameCallback((_) => load());
+          }
+
+          return AlertDialog(
+            title: const Text('Đặt lịch dùng máy'),
+            content: SizedBox(
+              width: 460,
+              height: 480,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  SizedBox(
+                    height: 44,
+                    child: ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: List.generate(7, (i) {
+                        final d = DateTime.now().add(Duration(days: i));
+                        final isSelected =
+                            _isoDate(d) == _isoDate(selectedDate);
+                        return Padding(
+                          padding: const EdgeInsets.only(right: 8),
+                          child: ChoiceChip(
+                            label: Text(_dateLabel(d)),
+                            selected: isSelected,
+                            selectedColor: kLabDeskAccent,
+                            labelStyle: TextStyle(
+                                color: isSelected ? Colors.white : null,
+                                fontSize: 12),
+                            onSelected: (_) {
+                              selectedDate = d;
+                              load();
+                            },
+                          ),
+                        );
+                      }),
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  if (mine.isNotEmpty) ...[
+                    Text('Lịch của bạn',
+                        style: TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: isDark ? Colors.white70 : Colors.black87)),
+                    const SizedBox(height: 4),
+                    ...mine.map((b) => Padding(
+                          padding: const EdgeInsets.only(bottom: 4),
+                          child: Row(
+                            children: [
+                              Expanded(
+                                child: Text(
+                                    '${b.date}  ${b.timeSlot}  ${b.machineId}',
+                                    style: const TextStyle(fontSize: 12)),
+                              ),
+                              TextButton(
+                                onPressed: () async {
+                                  final ok = await LabApiService.instance
+                                      .cancelBooking(studentId, b.date,
+                                          b.timeSlot, b.machineId);
+                                  if (ok) load();
+                                },
+                                child: const Text('Huỷ',
+                                    style: TextStyle(
+                                        fontSize: 12, color: Colors.red)),
+                              ),
+                            ],
+                          ),
+                        )),
+                    const Divider(),
+                  ],
+                  Expanded(
+                    child: loading
+                        ? const Center(child: CircularProgressIndicator())
+                        : slots.isEmpty
+                            ? const Center(
+                                child: Text(
+                                    'Chưa bật tính năng đặt lịch (thiếu sheet Schedule/Config).',
+                                    style: TextStyle(fontSize: 12)))
+                            : ListView.builder(
+                                itemCount: slots.length,
+                                itemBuilder: (_, i) {
+                                  final s = slots[i];
+                                  return ListTile(
+                                    dense: true,
+                                    title: Text(
+                                        '${s.timeSlot}  ·  ${s.machineName}',
+                                        style: const TextStyle(fontSize: 13)),
+                                    subtitle: s.available
+                                        ? null
+                                        : Text(
+                                            'Đã đặt: ${s.bookedBy ?? ''} (${s.bookedByStudentId ?? ''})',
+                                            style:
+                                                const TextStyle(fontSize: 11)),
+                                    trailing: s.available
+                                        ? ElevatedButton(
+                                            style: ElevatedButton.styleFrom(
+                                                backgroundColor: kLabDeskAccent,
+                                                minimumSize: const Size(0, 30)),
+                                            onPressed: () async {
+                                              final err = await LabApiService
+                                                  .instance
+                                                  .book(
+                                                      studentId,
+                                                      fullName,
+                                                      s.date,
+                                                      s.timeSlot,
+                                                      s.machineId);
+                                              if (!ctx.mounted) return;
+                                              if (err == null) {
+                                                load();
+                                              } else {
+                                                ScaffoldMessenger.of(ctx)
+                                                    .showSnackBar(SnackBar(
+                                                        content: Text(err)));
+                                              }
+                                            },
+                                            child: const Text('Đặt',
+                                                style: TextStyle(fontSize: 12)),
+                                          )
+                                        : null,
+                                  );
+                                },
+                              ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                  onPressed: () => Navigator.of(ctx).pop(),
+                  child: const Text('Đóng')),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
   Future<void> _showFeedbackDialog(bool isDark) async {
     final controller = TextEditingController();
     bool sending = false;
@@ -1040,16 +1221,32 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
             ),
           ),
           const SizedBox(height: 10),
-          TextButton.icon(
-            onPressed: () => _showFeedbackDialog(isDark),
-            icon: const Icon(Icons.feedback_outlined, size: 14),
-            label: const Text('Gửi góp ý'),
-            style: TextButton.styleFrom(
-              foregroundColor: isDark ? Colors.white38 : Colors.black38,
-              textStyle: const TextStyle(fontSize: 11.5),
-              minimumSize: const Size(0, 28),
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-            ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.center,
+            children: [
+              TextButton.icon(
+                onPressed: () => _showBookingDialog(isDark),
+                icon: const Icon(Icons.calendar_month_outlined, size: 14),
+                label: const Text('Đặt lịch dùng máy'),
+                style: TextButton.styleFrom(
+                  foregroundColor: isDark ? Colors.white38 : Colors.black38,
+                  textStyle: const TextStyle(fontSize: 11.5),
+                  minimumSize: const Size(0, 28),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+              ),
+              TextButton.icon(
+                onPressed: () => _showFeedbackDialog(isDark),
+                icon: const Icon(Icons.feedback_outlined, size: 14),
+                label: const Text('Gửi góp ý'),
+                style: TextButton.styleFrom(
+                  foregroundColor: isDark ? Colors.white38 : Colors.black38,
+                  textStyle: const TextStyle(fontSize: 11.5),
+                  minimumSize: const Size(0, 28),
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                ),
+              ),
+            ],
           ),
           Text(
             '© ${DateTime.now().year} LabDesk · ntthang-dev',

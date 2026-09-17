@@ -197,6 +197,51 @@ class LoginResult {
 
 enum SessionStatus { active, kicked, expired, notFound, error }
 
+class TimeSlot {
+  final String date;
+  final String timeSlot;
+  final String machineId;
+  final String machineName;
+  final bool available;
+  final String? bookedBy;
+  final String? bookedByStudentId;
+
+  TimeSlot({
+    required this.date,
+    required this.timeSlot,
+    required this.machineId,
+    required this.machineName,
+    required this.available,
+    this.bookedBy,
+    this.bookedByStudentId,
+  });
+
+  factory TimeSlot.fromJson(Map<String, dynamic> json) => TimeSlot(
+        date: json['date'] as String? ?? '',
+        timeSlot: json['time_slot'] as String? ?? '',
+        machineId: json['machine_id'] as String? ?? '',
+        machineName: json['machine_name'] as String? ?? '',
+        available: json['available'] == true,
+        bookedBy: json['booked_by'] as String?,
+        bookedByStudentId: json['booked_by_student_id'] as String?,
+      );
+}
+
+class MyBooking {
+  final String date;
+  final String timeSlot;
+  final String machineId;
+
+  MyBooking(
+      {required this.date, required this.timeSlot, required this.machineId});
+
+  factory MyBooking.fromJson(Map<String, dynamic> json) => MyBooking(
+        date: json['date'] as String? ?? '',
+        timeSlot: json['time_slot'] as String? ?? '',
+        machineId: json['machine_id'] as String? ?? '',
+      );
+}
+
 class LabApiService {
   static final LabApiService instance = LabApiService._();
   LabApiService._();
@@ -397,6 +442,102 @@ class LabApiService {
         return data['success'] == true;
       }
       return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  Future<List<TimeSlot>> checkAvailability(String date) async {
+    if (!LabConfig.isConfigured) return [];
+    try {
+      final uri = Uri.parse(LabConfig.apiUrl).replace(queryParameters: {
+        'action': 'check_availability',
+        'date': date,
+        'secret': LabConfig.sharedSecret,
+      });
+      final response = await _sendWithRedirect(uri,
+          method: 'GET', timeout: const Duration(seconds: 12));
+      if (response.statusCode != 200) return [];
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final slots = data['slots'] as List<dynamic>? ?? [];
+      return slots
+          .map((s) => TimeSlot.fromJson(s as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<List<MyBooking>> myBookings(String studentId) async {
+    if (!LabConfig.isConfigured || studentId.isEmpty) return [];
+    try {
+      final uri = Uri.parse(LabConfig.apiUrl).replace(queryParameters: {
+        'action': 'my_bookings',
+        'student_id': studentId,
+        'secret': LabConfig.sharedSecret,
+      });
+      final response = await _sendWithRedirect(uri,
+          method: 'GET', timeout: const Duration(seconds: 12));
+      if (response.statusCode != 200) return [];
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      final bookings = data['bookings'] as List<dynamic>? ?? [];
+      return bookings
+          .map((b) => MyBooking.fromJson(b as Map<String, dynamic>))
+          .toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  Future<String?> book(String studentId, String fullName, String date,
+      String timeSlot, String machineId) async {
+    if (!LabConfig.isConfigured) return 'Chưa cấu hình hệ thống.';
+    try {
+      final response = await _sendWithRedirect(
+        Uri.parse(LabConfig.apiUrl),
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'book',
+          'student_id': studentId,
+          'full_name': fullName,
+          'date': date,
+          'time_slot': timeSlot,
+          'machine_id': machineId,
+          'secret': LabConfig.sharedSecret,
+        }),
+        timeout: const Duration(seconds: 15),
+      );
+      if (response.statusCode != 200) return 'Máy chủ phản hồi lỗi.';
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      if (data['success'] == true) return null;
+      return data['reason'] as String? ?? 'Đặt lịch không thành công.';
+    } catch (_) {
+      return 'Lỗi mạng, vui lòng thử lại.';
+    }
+  }
+
+  Future<bool> cancelBooking(
+      String studentId, String date, String timeSlot, String machineId) async {
+    if (!LabConfig.isConfigured) return false;
+    try {
+      final response = await _sendWithRedirect(
+        Uri.parse(LabConfig.apiUrl),
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'cancel_booking',
+          'student_id': studentId,
+          'date': date,
+          'time_slot': timeSlot,
+          'machine_id': machineId,
+          'secret': LabConfig.sharedSecret,
+        }),
+        timeout: const Duration(seconds: 12),
+      );
+      if (response.statusCode != 200) return false;
+      final data = jsonDecode(response.body) as Map<String, dynamic>;
+      return data['success'] == true;
     } catch (_) {
       return false;
     }
