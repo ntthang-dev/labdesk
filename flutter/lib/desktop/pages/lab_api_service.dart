@@ -227,6 +227,16 @@ class TimeSlot {
       );
 }
 
+// checkAvailability() needs to tell "backend really has no slots configured"
+// apart from "the request itself failed" (stale deployment, network error,
+// bad secret) - both used to collapse into an empty list and the UI showed
+// one misleading hardcoded message for either case.
+class AvailabilityResult {
+  final List<TimeSlot> slots;
+  final String? error;
+  AvailabilityResult(this.slots, {this.error});
+}
+
 class MyBooking {
   final String date;
   final String timeSlot;
@@ -447,8 +457,10 @@ class LabApiService {
     }
   }
 
-  Future<List<TimeSlot>> checkAvailability(String date) async {
-    if (!LabConfig.isConfigured) return [];
+  Future<AvailabilityResult> checkAvailability(String date) async {
+    if (!LabConfig.isConfigured) {
+      return AvailabilityResult([], error: 'Chưa cấu hình hệ thống.');
+    }
     try {
       final uri = Uri.parse(LabConfig.apiUrl).replace(queryParameters: {
         'action': 'check_availability',
@@ -457,14 +469,24 @@ class LabApiService {
       });
       final response = await _sendWithRedirect(uri,
           method: 'GET', timeout: const Duration(seconds: 12));
-      if (response.statusCode != 200) return [];
+      if (response.statusCode != 200) {
+        // Most common cause: the deployed Code.gs predates the booking
+        // feature (stale deployment) and returns {"error":"unknown action"}
+        // with a non-200 status - surface that instead of guessing.
+        String reason = 'Máy chủ phản hồi lỗi (mã ${response.statusCode}).';
+        try {
+          final data = jsonDecode(response.body) as Map<String, dynamic>;
+          if (data['error'] != null) reason = 'Lỗi máy chủ: ${data['error']}';
+        } catch (_) {}
+        return AvailabilityResult([], error: reason);
+      }
       final data = jsonDecode(response.body) as Map<String, dynamic>;
       final slots = data['slots'] as List<dynamic>? ?? [];
-      return slots
+      return AvailabilityResult(slots
           .map((s) => TimeSlot.fromJson(s as Map<String, dynamic>))
-          .toList();
-    } catch (_) {
-      return [];
+          .toList());
+    } catch (e) {
+      return AvailabilityResult([], error: 'Không kết nối được máy chủ: $e');
     }
   }
 

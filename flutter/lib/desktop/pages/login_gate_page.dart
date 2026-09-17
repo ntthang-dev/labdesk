@@ -763,6 +763,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
 
     var selectedDate = DateTime.now();
     List<TimeSlot> slots = [];
+    String? slotsError;
     List<MyBooking> mine = [];
     bool loading = true;
 
@@ -772,14 +773,15 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
         builder: (ctx, setDialogState) {
           Future<void> load() async {
             setDialogState(() => loading = true);
-            final results = await Future.wait([
-              LabApiService.instance.checkAvailability(_isoDate(selectedDate)),
-              LabApiService.instance.myBookings(studentId),
-            ]);
+            final availability = await LabApiService.instance
+                .checkAvailability(_isoDate(selectedDate));
+            final myBookingsResult =
+                await LabApiService.instance.myBookings(studentId);
             if (!ctx.mounted) return;
             setDialogState(() {
-              slots = results[0] as List<TimeSlot>;
-              mine = results[1] as List<MyBooking>;
+              slots = availability.slots;
+              slotsError = availability.error;
+              mine = myBookingsResult;
               loading = false;
             });
           }
@@ -861,10 +863,21 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
                     child: loading
                         ? const Center(child: CircularProgressIndicator())
                         : slots.isEmpty
-                            ? const Center(
-                                child: Text(
-                                    'Chưa bật tính năng đặt lịch (thiếu sheet Schedule/Config).',
-                                    style: TextStyle(fontSize: 12)))
+                            ? Center(
+                                child: Padding(
+                                  padding: const EdgeInsets.all(12),
+                                  child: Text(
+                                    slotsError ??
+                                        'Không có khung giờ nào cho ngày này.',
+                                    textAlign: TextAlign.center,
+                                    style: TextStyle(
+                                        fontSize: 12,
+                                        color: slotsError != null
+                                            ? Colors.red
+                                            : null),
+                                  ),
+                                ),
+                              )
                             : ListView.builder(
                                 itemCount: slots.length,
                                 itemBuilder: (_, i) {
