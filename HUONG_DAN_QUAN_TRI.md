@@ -13,6 +13,16 @@ xem `CHANGELOG.md` (kiến trúc), `apps_script/SETUP.md` (setup Sheets), và
 > **Deploy → Manage deployments → bấm ✏️ cạnh deployment đã có → Version: New
 > version → Deploy**. Nếu lỡ tạo deployment mới, báo ngay để cập nhật lại
 > `LAB_API_URL` trong GitHub Secrets và build lại app.
+>
+> **Tự kiểm tra ngay sau khi deploy — không cần `SHARED_SECRET`, dán thẳng
+> vào trình duyệt**:
+> ```
+> <URL_WEB_APP_CỦA_BẠN>?action=version
+> ```
+> Nếu thấy `{"code_version":"...","features":[...]}` → deploy đã thành công,
+> đúng bản mới. Nếu thấy `{"error":"unauthorized"}` → **vẫn là code cũ**
+> (bản cũ không có action này) — quay lại làm đúng 2 bước Deploy ở trên.
+> Cách này nhanh hơn hẳn việc nhờ AI/người khác `curl` hộ bằng secret.
 
 ## App đang nằm ở đâu trên máy tôi?
 
