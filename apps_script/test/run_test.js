@@ -601,7 +601,10 @@ console.log('=== 20. Scheduling: book / double-book rejected / availability / ca
     ['slot_start_hour', '7'], ['slot_end_hour', '19'], ['slot_duration_minutes', '120'],
   ]);
   const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
-  const today = new Date().toISOString().slice(0, 10);
+  // dateStr() is local-time (matches a student's own machine), not UTC -
+  // toISOString().slice(0,10) drifts a day off from Code.gs's own idea of
+  // "today" for part of the day in any timezone ahead of UTC.
+  const today = sb.dateStr(new Date());
 
   const book1 = call(sb, 'doPost', {
     postData: { contents: JSON.stringify({ action: 'book', student_id: 's1', full_name: 'A', date: today, time_slot: '09:00-11:00', machine_id: '100.83.83.70', secret: 'S3CR3T' }) },
@@ -656,7 +659,8 @@ console.log('=== 21. Scheduling: reserved machine is skipped in login\'s free-ma
   sheets.Config = new FakeSheet(['key', 'value'], [
     ['slot_start_hour', '0'], ['slot_end_hour', '24'], ['slot_duration_minutes', '1440'],
   ]);
-  const today = new Date().toISOString().slice(0, 10);
+  const probeSb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets: {} }).sandbox, CODE_PATH);
+  const today = probeSb.dateStr(new Date());
   sheets.Schedule = new FakeSheet(
     ['date', 'time_slot', 'machine_id', 'student_id', 'full_name', 'status', 'created_at'],
     [[today, '00:00-24:00', '100.83.83.70', 'reserver', 'Reserver Person', 'booked', '']]
