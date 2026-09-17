@@ -7,6 +7,12 @@ import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:url_launcher/url_launcher.dart';
 
+// RustDesk's own brand color is MyTheme.accent = Color(0xFF0071FF)
+// (common.dart) - deliberately not reused here, so LabDesk's own screens
+// (this file) read as visually distinct at a glance rather than a
+// re-skinned RustDesk. Indigo, not the shared theme's blue.
+const Color kLabDeskAccent = Color(0xFF5E5CE6);
+
 typedef ConnectHandler = Future<void> Function(
   BuildContext context,
   String id, {
@@ -530,7 +536,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
   }
 
   Widget _buildActiveSessionView(BuildContext context, bool isDark) {
-    final accent = _isViewer ? Colors.blueAccent : Colors.green;
+    final accent = _isViewer ? kLabDeskAccent : Colors.green;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
@@ -568,7 +574,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
               style: const TextStyle(
                 fontSize: 12.5,
                 fontWeight: FontWeight.w600,
-                color: Colors.blueAccent,
+                color: kLabDeskAccent,
               ),
             ),
           ],
@@ -757,7 +763,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
               errorBuilder: (_, __, ___) => Icon(
                 Icons.computer,
                 size: 56,
-                color: Theme.of(context).colorScheme.primary,
+                color: kLabDeskAccent,
               ),
             ),
           ),
@@ -918,7 +924,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(12),
                 ),
-                backgroundColor: Theme.of(context).colorScheme.primary,
+                backgroundColor: kLabDeskAccent,
                 foregroundColor: Colors.white,
               ),
               child: _isLoading
@@ -935,6 +941,15 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
                       style:
                           TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                     ),
+            ),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            '© ${DateTime.now().year} LabDesk · ntthang-dev',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 10.5,
+              color: isDark ? Colors.white24 : Colors.black26,
             ),
           ),
         ],
