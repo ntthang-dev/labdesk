@@ -49,12 +49,11 @@ console.log('=== 2. login: happy path allocates the free machine ===');
   check('sheet row now occupied', row[headers.indexOf('status')] === 'occupied');
   check('audit log has login_allowed', sheets.AuditLog.rows.some(r => r[3] === 'login_allowed'));
 
-  console.log('  -- 2b. second login attempt on the now-occupied machine is rejected --');
+  console.log('  -- 2b. second login attempt on the now-occupied machine joins as a viewer --');
   const res2 = call(sb, 'doPost', {
     postData: { contents: JSON.stringify({ action: 'login', student_id: '20210002', full_name: 'Tran Thi B', secret: 'S3CR3T' }) },
   });
-  check('second student denied (no free machine)', res2.allowed === false, JSON.stringify(res2));
-  check('audit log has login_denied', sheets.AuditLog.rows.some(r => r[3] === 'login_denied'));
+  check('second student allowed in as a viewer, not denied', res2.allowed === true && res2.mode === 'view', JSON.stringify(res2));
 
   console.log('  -- 2c. same student tries to log in again elsewhere --');
   const res3 = call(sb, 'doPost', {
@@ -158,6 +157,70 @@ console.log('=== 7. wrong shared secret rejected on every action ===');
     postData: { contents: JSON.stringify({ action: 'login', student_id: '1', full_name: 'A', secret: 'WRONG' }) },
   });
   check('unauthorized on bad secret', res.error === 'unauthorized', JSON.stringify(res));
+}
+
+console.log('=== 8. view-only join when the machine is occupied ===');
+{
+  const sheets = freshSheets();
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  const login1 = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'controller', full_name: 'Controller', secret: 'S3CR3T' }) },
+  });
+  check('controller login allowed', login1.allowed === true, JSON.stringify(login1));
+  check('controller mode is control (not view)', login1.mode !== 'view', JSON.stringify(login1));
+
+  const login2 = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'viewer', full_name: 'Viewer', secret: 'S3CR3T' }) },
+  });
+  check('viewer login allowed', login2.allowed === true, JSON.stringify(login2));
+  check('viewer mode is view', login2.mode === 'view', JSON.stringify(login2));
+  check('viewer shares the controller\'s token', login2.session_token === login1.session_token, JSON.stringify(login2));
+  check('viewer gets the real machine_pass', login2.machine_pass === 'PTNhtd@2026', JSON.stringify(login2));
+  check('audit log recorded view_joined', sheets.AuditLog.rows.some(r => r[3] === 'view_joined'));
+
+  const headers = sheets.ActiveSessions.headers;
+  check('sheet still shows only the controller (no extra row)', sheets.ActiveSessions.rows.length === 1);
+  check('sheet occupant is still the controller', sheets.ActiveSessions.rows[0][headers.indexOf('student_id')] === 'controller');
+
+  console.log('  -- 8b. controller logout also ends the viewer\'s shared token --');
+  const out = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'logout', session_token: login1.session_token, secret: 'S3CR3T' }) },
+  });
+  check('controller logout succeeds', out.success === true, JSON.stringify(out));
+  const afterLogout = call(sb, 'doGet', { parameter: { action: 'status', token: login2.session_token, secret: 'S3CR3T' } });
+  check('viewer\'s shared token now reports not_found too', afterLogout.status === 'not_found', JSON.stringify(afterLogout));
+}
+
+console.log('=== 9. AuditLog carries the student name; whitelist name overrides a mistyped one ===');
+{
+  const sheets = freshSheets();
+  sheets.Students = new FakeSheet(
+    ['student_id', 'full_name', 'status'],
+    [['1', 'Nguyen Van Chuan', 'active']]
+  );
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+
+  const login = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: '1', full_name: 'nguyen van chuann (typo)', secret: 'S3CR3T' }) },
+  });
+  check('login allowed', login.allowed === true, JSON.stringify(login));
+
+  const headers = sheets.ActiveSessions.headers;
+  const recordedName = sheets.ActiveSessions.rows[0][headers.indexOf('full_name')];
+  check('sheet records the canonical whitelist name, not the typed one',
+      recordedName === 'Nguyen Van Chuan', recordedName);
+
+  const loginAllowedRow = sheets.AuditLog.rows.find(r => r[3] === 'login_allowed');
+  check('login_allowed audit entry carries the student name',
+      !!loginAllowedRow && loginAllowedRow[4] === 'Nguyen Van Chuan', JSON.stringify(loginAllowedRow));
+
+  const out = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'logout', session_token: login.session_token, secret: 'S3CR3T' }) },
+  });
+  check('logout succeeds', out.success === true);
+  const logoutRow = sheets.AuditLog.rows.find(r => r[3] === 'logout');
+  check('logout audit entry carries the student name',
+      !!logoutRow && logoutRow[4] === 'Nguyen Van Chuan', JSON.stringify(logoutRow));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

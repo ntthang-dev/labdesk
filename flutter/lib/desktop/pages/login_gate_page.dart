@@ -31,6 +31,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
   String? _connectedMachineName;
   Timer? _pollTimer;
   DateTime? _connectedAt;
+  bool _isViewer = false;
 
   @override
   void initState() {
@@ -61,7 +62,9 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
   @override
   void onWindowClose() async {
     final token = _activeSessionToken;
-    if (token != null) {
+    // A viewer doesn't own the row (it's the controller's), so their
+    // "logout" must never free it - see _handleLogin's view-mode comment.
+    if (token != null && !_isViewer) {
       await LabApiService.instance.logout(token);
     }
     bind.mainOnMainWindowClose();
@@ -111,6 +114,18 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       }
 
       _connectedMachineName = result.machineName ?? 'Máy phòng Lab';
+      _isViewer = result.isViewOnly;
+
+      // `view-only` is a per-peer setting RustDesk itself enforces (blocks
+      // sending keyboard/mouse before the first frame - see
+      // input_model.dart's `if (isViewOnly) return;` guards). It persists
+      // per machine_id, so it must be set explicitly both ways every time:
+      // a later controller session must not inherit a stale 'Y' from an
+      // earlier view join.
+      if (widget.connectHandler == null) {
+        bind.mainSetPeerOptionSync(
+            id: machineId, key: 'view-only', value: _isViewer ? 'Y' : 'N');
+      }
 
       try {
         if (widget.connectHandler != null) {
@@ -122,7 +137,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
         setState(() => _isLoading = false);
         _startPolling();
       } catch (e) {
-        if (_activeSessionToken != null) {
+        if (_activeSessionToken != null && !_isViewer) {
           await LabApiService.instance.logout(_activeSessionToken!);
           _activeSessionToken = null;
         }
@@ -168,11 +183,14 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
         !rustDeskWinManager.hasActiveRemoteDesktopWindows()) {
       _pollTimer?.cancel();
       _connectedAt = null;
-      await LabApiService.instance.logout(token);
+      if (!_isViewer) {
+        await LabApiService.instance.logout(token);
+      }
       if (mounted) {
         setState(() {
           _activeSessionToken = null;
           _connectedMachineName = null;
+          _isViewer = false;
         });
       }
       return;
@@ -187,6 +205,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       _activeSessionToken = null;
       _connectedMachineName = null;
       _connectedAt = null;
+      _isViewer = false;
 
       if (widget.connectHandler == null) {
         await rustDeskWinManager.closeAllSubWindows();
@@ -204,6 +223,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       _activeSessionToken = null;
       _connectedMachineName = null;
       _connectedAt = null;
+      _isViewer = false;
       if (widget.connectHandler == null) {
         await rustDeskWinManager.closeAllSubWindows();
       }
@@ -221,7 +241,9 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
     _connectedAt = null;
     setState(() => _isLoading = true);
 
-    if (token != null) {
+    // A viewer never owns the row - logging them out here would free the
+    // machine out from under the actual controller.
+    if (token != null && !_isViewer) {
       await LabApiService.instance.logout(token);
     }
     if (widget.connectHandler == null) {
@@ -231,6 +253,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       setState(() {
         _activeSessionToken = null;
         _connectedMachineName = null;
+        _isViewer = false;
         _isLoading = false;
       });
     }
@@ -243,43 +266,95 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
     return Scaffold(
       backgroundColor:
           isDark ? const Color(0xFF1E1E2E) : const Color(0xFFF5F5F7),
-      body: Center(
-        child: SingleChildScrollView(
-          child: Container(
-            width: 440,
-            padding: const EdgeInsets.all(36),
-            decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF2D2D3F) : Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              boxShadow: [
-                BoxShadow(
-                  color: isDark
-                      ? const Color(0x4D000000)
-                      : const Color(0x1A000000),
-                  blurRadius: 24,
-                  offset: const Offset(0, 8),
+      // main.dart's WindowOptions uses TitleBarStyle.hidden (frameless, no OS
+      // chrome) so DesktopTab normally draws the close/minimize/drag strip -
+      // but LoginGatePage is used directly as `home`, bypassing DesktopTab
+      // entirely. Without this, the window has no visible close control at
+      // all, most noticeably on Windows where (unlike macOS) a frameless
+      // window has no fallback native buttons whatsoever.
+      body: Stack(
+        children: [
+          Center(
+            child: SingleChildScrollView(
+              child: Container(
+                width: 440,
+                padding: const EdgeInsets.all(36),
+                decoration: BoxDecoration(
+                  color: isDark ? const Color(0xFF2D2D3F) : Colors.white,
+                  borderRadius: BorderRadius.circular(20),
+                  boxShadow: [
+                    BoxShadow(
+                      color: isDark
+                          ? const Color(0x4D000000)
+                          : const Color(0x1A000000),
+                      blurRadius: 24,
+                      offset: const Offset(0, 8),
+                    ),
+                  ],
                 ),
-              ],
+                child: _activeSessionToken != null
+                    ? _buildActiveSessionView(context, isDark)
+                    : _buildLoginForm(context, isDark),
+              ),
             ),
-            child: _activeSessionToken != null
-                ? _buildActiveSessionView(context, isDark)
-                : _buildLoginForm(context, isDark),
           ),
+          if (widget.connectHandler == null) _buildWindowControls(isDark),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWindowControls(bool isDark) {
+    final iconColor = isDark ? Colors.white60 : Colors.black45;
+    return Positioned(
+      top: 0,
+      left: 0,
+      right: 0,
+      height: 36,
+      child: GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onPanStart: (_) => windowManager.startDragging(),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.end,
+          children: [
+            IconButton(
+              icon: Icon(Icons.close, size: 18, color: iconColor),
+              tooltip: 'Đóng',
+              splashRadius: 16,
+              onPressed: () => windowManager.close(),
+            ),
+          ],
         ),
       ),
     );
   }
 
   Widget _buildActiveSessionView(BuildContext context, bool isDark) {
+    final accent = _isViewer ? Colors.blueAccent : Colors.green;
     return Column(
       mainAxisSize: MainAxisSize.min,
       children: [
-        const Icon(Icons.check_circle_outline, size: 64, color: Colors.green),
-        const SizedBox(height: 16),
-        const Text(
-          'Đang trong phiên kết nối',
-          style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+        Icon(
+          _isViewer ? Icons.visibility_outlined : Icons.check_circle_outline,
+          size: 64,
+          color: accent,
         ),
+        const SizedBox(height: 16),
+        Text(
+          _isViewer ? 'Đang xem (không điều khiển được)' : 'Đang trong phiên kết nối',
+          style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+        ),
+        if (_isViewer) ...[
+          const SizedBox(height: 6),
+          Text(
+            'Máy đang có bạn khác điều khiển. Bạn chỉ xem được màn hình, không gõ phím hay dùng chuột được.',
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              fontSize: 12.5,
+              color: isDark ? Colors.white60 : Colors.black54,
+            ),
+          ),
+        ],
         const SizedBox(height: 8),
         Text(
           'Máy: ${_connectedMachineName ?? "Máy phòng Lab"}',
@@ -298,11 +373,11 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
           decoration: BoxDecoration(
-            color: Colors.green.withOpacity(0.12),
+            color: accent.withOpacity(0.12),
             borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: Colors.green.withOpacity(0.3)),
+            border: Border.all(color: accent.withOpacity(0.3)),
           ),
-          child: const Row(
+          child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
               SizedBox(
@@ -310,13 +385,13 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
                 height: 10,
                 child: CircularProgressIndicator(
                   strokeWidth: 2,
-                  color: Colors.green,
+                  color: accent,
                 ),
               ),
-              SizedBox(width: 10),
+              const SizedBox(width: 10),
               Text(
                 'Kiểm tra phiên mỗi 12 giây với máy chủ',
-                style: TextStyle(color: Colors.green, fontSize: 12),
+                style: TextStyle(color: accent, fontSize: 12),
               ),
             ],
           ),
@@ -340,8 +415,8 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
                     width: 20,
                     height: 20,
                     child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
-                : const Text('Ngắt kết nối & Đăng xuất',
-                    style: TextStyle(fontWeight: FontWeight.bold)),
+                : Text(_isViewer ? 'Rời khỏi' : 'Ngắt kết nối & Đăng xuất',
+                    style: const TextStyle(fontWeight: FontWeight.bold)),
           ),
         ),
       ],

@@ -111,7 +111,8 @@ function reapStaleSessions() {
         parseTime(data[r][headers.indexOf('started_at')]);
     if (seen === 0 || seen > cutoff) continue;
     writeAuditLog(data[r][headers.indexOf('student_id')],
-        data[r][headers.indexOf('machine_id')], 'expired', 'No heartbeat');
+        data[r][headers.indexOf('machine_id')], 'expired',
+        (data[r][headers.indexOf('full_name')] || '') + ' - No heartbeat');
     freeSessionRow(r + 1, headers);
     changed = true;
   }
@@ -179,7 +180,13 @@ function doGet(e) {
 // ----- login -----
 
 function handleLogin(body) {
-  const { student_id, full_name } = body;
+  const { student_id } = body;
+  // The name typed by the student is only a fallback: whenever the Students
+  // whitelist has a matching row, its own full_name is authoritative below
+  // and overrides it (fixes the name recorded in AuditLog/ActiveSessions not
+  // matching the roster - a typo, nickname or wrong capitalization typed at
+  // login no longer sticks).
+  let full_name = body.full_name;
   if (!student_id || !full_name) {
     return jsonResponse({ allowed: false, reason: 'Vui lòng nhập đầy đủ họ tên và MSSV.' });
   }
@@ -192,15 +199,19 @@ function handleLogin(body) {
       const headers = students[0];
       const idCol = headers.indexOf('student_id');
       const statusCol = headers.indexOf('status');
+      const nameCol = headers.indexOf('full_name');
       if (idCol !== -1) {
         const found = students.slice(1).find(r => String(r[idCol]).trim() === String(student_id).trim());
         if (!found) {
-          writeAuditLog(student_id, '', 'login_denied', 'Student not in whitelist');
+          writeAuditLog(student_id, '', 'login_denied', 'Student not in whitelist (typed name: ' + full_name + ')');
           return jsonResponse({ allowed: false, reason: 'MSSV không có trong danh sách. Vui lòng liên hệ Quản trị viên.' });
         }
         if (statusCol !== -1 && String(found[statusCol]).trim().toLowerCase() === 'suspended') {
-          writeAuditLog(student_id, '', 'login_denied', 'Student suspended');
+          writeAuditLog(student_id, '', 'login_denied', 'Student suspended (' + full_name + ')');
           return jsonResponse({ allowed: false, reason: 'Tài khoản của bạn đã bị tạm khoá. Vui lòng liên hệ Quản trị viên.' });
+        }
+        if (nameCol !== -1 && String(found[nameCol]).trim()) {
+          full_name = String(found[nameCol]).trim();
         }
       }
     }
@@ -233,19 +244,22 @@ function handleLogin(body) {
     }
   }
 
-  // Find first free machine (or a specific machine if body.machine_id is provided)
+  // Find first free machine (or a specific machine if body.machine_id is provided).
+  // Remember the first *occupied* row too: if nothing is free, that row lets a
+  // second student join the existing session as a view-only observer instead
+  // of being flatly denied (RustDesk allows multiple simultaneous connections
+  // to one host; view-only is enforced client-side, see LabDesk's
+  // login_gate_page.dart).
   let targetRow = null;
+  let occupiedFallback = null;
   for (let r = 1; r < sessData.length; r++) {
     const isFree = String(sessData[r][statusCol]).trim().toLowerCase() === 'free';
     if (body.machine_id) {
       if (String(sessData[r][machineIdCol]).trim() === String(body.machine_id).trim()) {
         if (!isFree) {
-          const occupant = sessData[r][sessHeaders.indexOf('full_name')] || sessData[r][sidCol];
-          writeAuditLog(student_id, body.machine_id, 'login_denied', 'Machine occupied by ' + occupant);
-          return jsonResponse({
-            allowed: false,
-            reason: 'Máy này hiện đang có người sử dụng. Vui lòng thử lại sau.'
-          });
+          occupiedFallback = { row: r + 1, data: {}, headers: sessHeaders };
+          sessHeaders.forEach((h, i) => { occupiedFallback.data[h] = sessData[r][i]; });
+          break;
         }
         targetRow = { row: r + 1, data: {}, headers: sessHeaders };
         sessHeaders.forEach((h, i) => { targetRow.data[h] = sessData[r][i]; });
@@ -255,10 +269,31 @@ function handleLogin(body) {
       targetRow = { row: r + 1, data: {}, headers: sessHeaders };
       sessHeaders.forEach((h, i) => { targetRow.data[h] = sessData[r][i]; });
       break;
+    } else if (!occupiedFallback) {
+      occupiedFallback = { row: r + 1, data: {}, headers: sessHeaders };
+      sessHeaders.forEach((h, i) => { occupiedFallback.data[h] = sessData[r][i]; });
     }
   }
 
   if (!targetRow) {
+    if (occupiedFallback && occupiedFallback.data['session_token']) {
+      const machineId = occupiedFallback.data['machine_id'];
+      const controllerName = occupiedFallback.data['full_name'] || occupiedFallback.data['student_id'];
+      writeAuditLog(student_id, machineId, 'view_joined',
+          full_name + ' joined as viewer (controller: ' + controllerName + ')');
+      return jsonResponse({
+        allowed: true,
+        mode: 'view',
+        // Deliberately the CONTROLLER's token, not a new one: no extra sheet
+        // row is created for viewers, so status()/kick/expiry/logout on the
+        // controller's session transparently ends every viewer's poll loop
+        // too, with zero schema changes.
+        session_token: occupiedFallback.data['session_token'],
+        machine_id: machineId,
+        machine_name: occupiedFallback.data['machine_name'] || machineId,
+        machine_pass: occupiedFallback.data['machine_pass'] || ''
+      });
+    }
     writeAuditLog(student_id, body.machine_id || '', 'login_denied', 'No free machine');
     return jsonResponse({ allowed: false, reason: 'Hiện không còn máy trống. Vui lòng thử lại sau.' });
   }
@@ -274,7 +309,7 @@ function handleLogin(body) {
   setSessionCell(targetRow.row, sessHeaders, 'admin_action', '');
   setSessionCell(targetRow.row, sessHeaders, 'last_seen', now());
 
-  writeAuditLog(student_id, machineId, 'login_allowed', '');
+  writeAuditLog(student_id, machineId, 'login_allowed', full_name);
 
   return jsonResponse({
     allowed: true,
@@ -306,7 +341,8 @@ function handleStatus(params) {
     const machineId = found.data['machine_id'];
     freeSessionRow(found.row, found.headers);
 
-    writeAuditLog(studentId, machineId, 'kicked', 'Admin kick');
+    writeAuditLog(studentId, machineId, 'kicked',
+        (found.data['full_name'] || studentId) + ' - Admin kick');
     return jsonResponse({ status: 'kicked' });
   }
 
@@ -332,7 +368,7 @@ function handleLogout(body) {
 
   freeSessionRow(found.row, found.headers);
 
-  writeAuditLog(studentId, machineId, 'logout', '');
+  writeAuditLog(studentId, machineId, 'logout', found.data['full_name'] || '');
   return jsonResponse({ success: true });
 }
 

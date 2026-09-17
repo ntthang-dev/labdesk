@@ -102,6 +102,13 @@ class LoginResult {
   final String? machineName;
   final String? machinePass;
   final String? reason;
+  // 'view' when the machine was already occupied and this login was granted
+  // as a read-only observer of the existing session instead (Code.gs' view
+  // join); anything else (including null, e.g. an error result) means normal
+  // control.
+  final String? mode;
+
+  bool get isViewOnly => mode == 'view';
 
   LoginResult({
     required this.allowed,
@@ -110,6 +117,7 @@ class LoginResult {
     this.machineName,
     this.machinePass,
     this.reason,
+    this.mode,
   });
 
   factory LoginResult.fromJson(Map<String, dynamic> json) {
@@ -124,6 +132,7 @@ class LoginResult {
       machineName: json['machine_name'] as String?,
       machinePass: json['machine_pass'] as String?,
       reason: json['reason'] as String?,
+      mode: json['mode'] as String?,
     );
   }
 
