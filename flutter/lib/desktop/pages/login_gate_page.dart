@@ -744,6 +744,102 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
     );
   }
 
+  Future<void> _showFeedbackDialog(bool isDark) async {
+    final controller = TextEditingController();
+    bool sending = false;
+    String? error;
+    await showDialog(
+      context: context,
+      builder: (ctx) => StatefulBuilder(
+        builder: (ctx, setDialogState) => AlertDialog(
+          title: const Text('Gửi góp ý'),
+          content: SizedBox(
+            width: 380,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Góp ý sẽ được gửi thẳng vào hệ thống quản lý phòng Lab.',
+                  style: TextStyle(
+                      fontSize: 12,
+                      color: isDark ? Colors.white60 : Colors.black54),
+                ),
+                const SizedBox(height: 10),
+                TextField(
+                  controller: controller,
+                  maxLines: 4,
+                  maxLength: 2000,
+                  autofocus: true,
+                  decoration: const InputDecoration(
+                    hintText: 'Máy nào có vấn đề? Bạn muốn cải thiện gì?',
+                    border: OutlineInputBorder(),
+                  ),
+                ),
+                if (error != null)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: Text(error!,
+                        style:
+                            const TextStyle(color: Colors.red, fontSize: 12)),
+                  ),
+              ],
+            ),
+          ),
+          actions: [
+            TextButton(
+              onPressed: sending ? null : () => Navigator.of(ctx).pop(),
+              child: const Text('Huỷ'),
+            ),
+            ElevatedButton(
+              onPressed: sending
+                  ? null
+                  : () async {
+                      final message = controller.text.trim();
+                      if (message.isEmpty) {
+                        setDialogState(() => error = 'Vui lòng nhập nội dung.');
+                        return;
+                      }
+                      setDialogState(() {
+                        sending = true;
+                        error = null;
+                      });
+                      final ok = await LabApiService.instance.sendFeedback(
+                        _studentIdController.text.trim(),
+                        _connectedFullName ?? _nameController.text.trim(),
+                        message,
+                      );
+                      if (!ctx.mounted) return;
+                      if (ok) {
+                        Navigator.of(ctx).pop();
+                        if (mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            const SnackBar(
+                                content: Text('Đã gửi góp ý. Cảm ơn bạn!')),
+                          );
+                        }
+                      } else {
+                        setDialogState(() {
+                          sending = false;
+                          error = 'Gửi không thành công. Vui lòng thử lại.';
+                        });
+                      }
+                    },
+              style: ElevatedButton.styleFrom(backgroundColor: kLabDeskAccent),
+              child: sending
+                  ? const SizedBox(
+                      width: 16,
+                      height: 16,
+                      child: CircularProgressIndicator(
+                          strokeWidth: 2, color: Colors.white))
+                  : const Text('Gửi'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _buildLoginForm(BuildContext context, bool isDark) {
     return Form(
       key: _formKey,
@@ -943,7 +1039,18 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
                     ),
             ),
           ),
-          const SizedBox(height: 14),
+          const SizedBox(height: 10),
+          TextButton.icon(
+            onPressed: () => _showFeedbackDialog(isDark),
+            icon: const Icon(Icons.feedback_outlined, size: 14),
+            label: const Text('Gửi góp ý'),
+            style: TextButton.styleFrom(
+              foregroundColor: isDark ? Colors.white38 : Colors.black38,
+              textStyle: const TextStyle(fontSize: 11.5),
+              minimumSize: const Size(0, 28),
+              padding: const EdgeInsets.symmetric(horizontal: 8),
+            ),
+          ),
           Text(
             '© ${DateTime.now().year} LabDesk · ntthang-dev',
             textAlign: TextAlign.center,

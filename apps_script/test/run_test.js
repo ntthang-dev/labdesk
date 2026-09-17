@@ -545,5 +545,41 @@ console.log('  -- 17a. no Config -> expires_at is empty, not an error --');
   check('no time limit configured -> expires_at is empty string', res.expires_at === '', JSON.stringify(res));
 }
 
+console.log('=== 18. Feedback (self-creating sheet, no lock contention with login) ===');
+{
+  const sheets = freshSheets(); // no Feedback sheet yet
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+
+  const res = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'feedback', student_id: 'SV001', full_name: 'A', message: 'Máy 3 bị lag nhiều', secret: 'S3CR3T' }) },
+  });
+  check('feedback accepted', res.success === true, JSON.stringify(res));
+  check('Feedback sheet auto-created', !!sheets.Feedback);
+  check('header row written', sheets.Feedback.rows[0].join(',') === 'timestamp,student_id,full_name,message');
+  check('feedback row appended with the right content',
+      sheets.Feedback.rows[1][1] === 'SV001' && sheets.Feedback.rows[1][3] === 'Máy 3 bị lag nhiều',
+      JSON.stringify(sheets.Feedback.rows));
+
+  console.log('  -- 18a. empty message rejected --');
+  const empty = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'feedback', student_id: 'SV001', message: '   ', secret: 'S3CR3T' }) },
+  });
+  check('empty message rejected', empty.success === false, JSON.stringify(empty));
+
+  console.log('  -- 18b. very long message is capped, not rejected --');
+  const longMsg = 'x'.repeat(5000);
+  const capped = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'feedback', student_id: 'SV001', message: longMsg, secret: 'S3CR3T' }) },
+  });
+  check('long message accepted', capped.success === true);
+  check('message capped at 2000 chars', sheets.Feedback.rows[sheets.Feedback.rows.length - 1][3].length === 2000);
+
+  console.log('  -- 18c. wrong secret still rejected --');
+  const bad = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'feedback', student_id: 'SV001', message: 'test', secret: 'WRONG' }) },
+  });
+  check('wrong secret rejected even for feedback', bad.error === 'unauthorized', JSON.stringify(bad));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

@@ -7,8 +7,9 @@ import 'package:http/http.dart' as http;
 class LabConfig {
   static const String _envApiUrl =
       String.fromEnvironment('LAB_API_URL', defaultValue: '');
-  static const String _envSharedSecret =
-      String.fromEnvironment('LAB_SHARED_SECRET', defaultValue: 'your-secret-key-here');
+  static const String _envSharedSecret = String.fromEnvironment(
+      'LAB_SHARED_SECRET',
+      defaultValue: 'your-secret-key-here');
   static const String _envMachineId =
       String.fromEnvironment('LAB_MACHINE_ID', defaultValue: '');
   static const String _envMachinePassword =
@@ -34,8 +35,7 @@ class LabConfig {
 
   static String get apiUrl => _overrideApiUrl ?? _envApiUrl;
   static String get sharedSecret => _overrideSharedSecret ?? _envSharedSecret;
-  static String get machineRustdeskId =>
-      _overrideMachineId ?? _envMachineId;
+  static String get machineRustdeskId => _overrideMachineId ?? _envMachineId;
   static String get machinePassword =>
       _overrideMachinePassword ?? _envMachinePassword;
 
@@ -67,8 +67,7 @@ class LabConfig {
     try {
       final f = _configFile;
       if (f.existsSync()) {
-        final data =
-            jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
+        final data = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
         _overrideApiUrl = _override(data['api_url']);
         _overrideSharedSecret = _override(data['shared_secret']);
         _overrideMachineId = _override(data['machine_id']);
@@ -180,10 +179,12 @@ class LoginResult {
       forceUpdate: json['force_update'] == true,
       downloadUrl: json['download_url'] as String?,
       latestVersion: json['latest_version'] as String?,
-      queuePosition: json['queue_position'] is int ? json['queue_position'] as int : null,
+      queuePosition:
+          json['queue_position'] is int ? json['queue_position'] as int : null,
       controllerName: json['controller_name'] as String?,
       controllerStudentId: json['controller_student_id'] as String?,
-      expiresAt: (json['expires_at'] is String && (json['expires_at'] as String).isNotEmpty)
+      expiresAt: (json['expires_at'] is String &&
+              (json['expires_at'] as String).isNotEmpty)
           ? DateTime.tryParse(json['expires_at'] as String)
           : null,
     );
@@ -303,8 +304,7 @@ class LabApiService {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         return LoginResult.fromJson(data);
       }
-      return LoginResult.error(
-          'Máy chủ phản hồi lỗi (${response.statusCode})');
+      return LoginResult.error('Máy chủ phản hồi lỗi (${response.statusCode})');
     } catch (e) {
       // Never interpolate `e`: on a network failure it can embed resolver/host
       // details, and there is nothing a student can act on from that anyway.
@@ -363,6 +363,35 @@ class LabApiService {
         timeout: const Duration(seconds: 10),
       );
 
+      if (response.statusCode == 200) {
+        final data = jsonDecode(response.body) as Map<String, dynamic>;
+        return data['success'] == true;
+      }
+      return false;
+    } catch (_) {
+      return false;
+    }
+  }
+
+  // Not routed through the login lock server-side (see Code.gs' doPost),
+  // so this never queues behind other students' logins.
+  Future<bool> sendFeedback(
+      String studentId, String fullName, String message) async {
+    if (!LabConfig.isConfigured) return false;
+    try {
+      final response = await _sendWithRedirect(
+        Uri.parse(LabConfig.apiUrl),
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: jsonEncode({
+          'action': 'feedback',
+          'student_id': studentId,
+          'full_name': fullName,
+          'message': message,
+          'secret': LabConfig.sharedSecret,
+        }),
+        timeout: const Duration(seconds: 10),
+      );
       if (response.statusCode == 200) {
         final data = jsonDecode(response.body) as Map<String, dynamic>;
         return data['success'] == true;

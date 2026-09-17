@@ -69,6 +69,10 @@ function buildSandbox({ sharedSecret, sheets, active }) {
     SpreadsheetApp: {
       getActiveSpreadsheet: () => ({
         getSheetByName: (name) => sheets[name] || null,
+        insertSheet: (name) => {
+          sheets[name] = new FakeSheet([], []);
+          return sheets[name];
+        },
       }),
       getUi: () => ui,
       getActiveSheet: () => {
