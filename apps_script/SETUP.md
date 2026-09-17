@@ -73,6 +73,10 @@
 > gian mỗi phiên — hết giờ, client tự bị đăng xuất ở lần poll kế tiếp (≤12s),
 > y hệt cơ chế mất kết nối 60s đã có. Không thêm key này = không giới hạn
 > giờ, như hiện tại.
+>
+> Thêm key `max_bookings_per_week` (số nguyên) để giới hạn mỗi sinh viên chỉ
+> được đặt tối đa N lượt đang hiệu lực (chưa huỷ, chưa qua) cùng lúc — chống
+> 1 người ôm hết khung giờ. Không thêm key này = không giới hạn số lượt đặt.
 
 ### Sheet 5: `Queue` (optional — hàng đợi)
 
