@@ -120,6 +120,7 @@ class LoginResult {
   final bool forceUpdate;
   final String? downloadUrl;
   final String? latestVersion;
+  final int? queuePosition;
 
   bool get isViewOnly => mode == 'view';
   bool get updateAvailable =>
@@ -153,6 +154,7 @@ class LoginResult {
     this.forceUpdate = false,
     this.downloadUrl,
     this.latestVersion,
+    this.queuePosition,
   });
 
   factory LoginResult.fromJson(Map<String, dynamic> json) {
@@ -172,6 +174,7 @@ class LoginResult {
       forceUpdate: json['force_update'] == true,
       downloadUrl: json['download_url'] as String?,
       latestVersion: json['latest_version'] as String?,
+      queuePosition: json['queue_position'] is int ? json['queue_position'] as int : null,
     );
   }
 

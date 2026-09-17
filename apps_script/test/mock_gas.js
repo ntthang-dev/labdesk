@@ -44,6 +44,7 @@ class FakeSheet {
     };
   }
   appendRow(row) { this.rows.push(row.slice()); }
+  deleteRow(sheetRow) { this.rows.splice(sheetRow - 2, 1); } // sheetRow is 1-based incl. header
 }
 
 function buildSandbox({ sharedSecret, sheets, active }) {

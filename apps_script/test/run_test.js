@@ -309,5 +309,99 @@ console.log('=== 11. Admin Sheets menu (Kick / Suspend / Unsuspend selected row)
   // already covered in test 6 - not re-tested here to avoid duplicating it.
 }
 
+console.log('=== 12. Per-session time limit (Config!max_minutes) ===');
+{
+  const sheets = freshSheets();
+  sheets.Config = new FakeSheet(['key', 'value'], [['max_minutes', '30']]);
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+
+  const login = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'tl1', full_name: 'A', secret: 'S3CR3T' }) },
+  });
+  check('login allocates the machine', login.allowed === true, JSON.stringify(login));
+
+  const headers = sheets.ActiveSessions.headers;
+  const expiresAtCol = headers.indexOf('expires_at');
+  check('expires_at column auto-created and set', expiresAtCol !== -1 && !!sheets.ActiveSessions.rows[0][expiresAtCol]);
+
+  console.log('  -- 12a. status poll before the limit: still active --');
+  const early = call(sb, 'doGet', { parameter: { action: 'status', token: login.session_token, secret: 'S3CR3T' } });
+  check('still active well before 30 minutes', early.status === 'active', JSON.stringify(early));
+
+  console.log('  -- 12b. time limit reached: next poll frees the machine --');
+  sheets.ActiveSessions.rows[0][expiresAtCol] = new Date(Date.now() - 1000).toISOString();
+  const late = call(sb, 'doGet', { parameter: { action: 'status', token: login.session_token, secret: 'S3CR3T' } });
+  check('status reports expired once the time limit passes', late.status === 'expired', JSON.stringify(late));
+  check('sheet row freed', sheets.ActiveSessions.rows[0][headers.indexOf('status')] === 'free');
+  check('audit log recorded the time-limit expiry',
+      sheets.AuditLog.rows.some(r => r[3] === 'expired' && String(r[4]).indexOf('Time limit') !== -1));
+}
+console.log('  -- 12c. no Config -> no limit is imposed (backward compatible) --');
+{
+  const sheets = freshSheets();
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  const login = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'nolimit', full_name: 'A', secret: 'S3CR3T' }) },
+  });
+  const headers = sheets.ActiveSessions.headers;
+  check('no expires_at set when Config is absent',
+      !sheets.ActiveSessions.rows[0][headers.indexOf('expires_at')]);
+}
+
+console.log('=== 13. Queue (optional Queue sheet) when the machine is occupied ===');
+{
+  const sheets = freshSheets();
+  sheets.Queue = new FakeSheet(['student_id', 'full_name', 'machine_id', 'requested_at'], []);
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+
+  call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'controller', full_name: 'Controller', secret: 'S3CR3T' }) },
+  });
+
+  const q1 = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'q1', full_name: 'Queued One', secret: 'S3CR3T' }) },
+  });
+  check('first queued student is position 1', q1.queue_position === 1, JSON.stringify(q1));
+  check('first queued student still gets view mode', q1.mode === 'view');
+
+  const q2 = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'q2', full_name: 'Queued Two', secret: 'S3CR3T' }) },
+  });
+  check('second queued student is position 2', q2.queue_position === 2, JSON.stringify(q2));
+
+  console.log('  -- 13a. repeat attempt from the same student does not duplicate their spot --');
+  const q1Again = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'q1', full_name: 'Queued One', secret: 'S3CR3T' }) },
+  });
+  check('re-attempt keeps the same position, does not push to the back', q1Again.queue_position === 1, JSON.stringify(q1Again));
+  check('queue sheet has exactly 2 entries, not 3', sheets.Queue.rows.length === 2, JSON.stringify(sheets.Queue.rows));
+
+  console.log('  -- 13b. controller logs out; q1 logs in and is dequeued --');
+  const controllerToken = q1.session_token; // shared controller token
+  call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'logout', session_token: controllerToken, secret: 'S3CR3T' }) },
+  });
+  call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'q1', full_name: 'Queued One', secret: 'S3CR3T' }) },
+  });
+  check('q1 is removed from the queue after becoming controller',
+      !sheets.Queue.rows.some(r => r[0] === 'q1'), JSON.stringify(sheets.Queue.rows));
+  check('q2 is still in the queue (untouched)',
+      sheets.Queue.rows.some(r => r[0] === 'q2'), JSON.stringify(sheets.Queue.rows));
+}
+console.log('  -- 13c. no Queue sheet -> queue_position is just null (backward compatible) --');
+{
+  const sheets = freshSheets();
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'c', full_name: 'C', secret: 'S3CR3T' }) },
+  });
+  const res = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'v', full_name: 'V', secret: 'S3CR3T' }) },
+  });
+  check('view mode still granted without a Queue sheet', res.mode === 'view', JSON.stringify(res));
+  check('queue_position is null, not an error', res.queue_position === null, JSON.stringify(res));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

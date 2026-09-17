@@ -37,6 +37,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
   DateTime? _connectedAt;
   bool _isViewer = false;
   String? _updateDownloadUrl; // set when force_update or updateAvailable
+  int? _queuePosition;
 
   @override
   void initState() {
@@ -125,6 +126,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       _connectedFullName = result.fullName ?? _nameController.text.trim();
       _isViewer = result.isViewOnly;
       _updateDownloadUrl = result.updateAvailable ? result.downloadUrl : null;
+      _queuePosition = result.queuePosition;
 
       // `view-only` is a per-peer setting RustDesk itself enforces (blocks
       // sending keyboard/mouse before the first frame - see
@@ -165,6 +167,10 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       setState(() {
         _isLoading = false;
         _errorMessage = result.reason ?? 'Đăng nhập bị từ chối';
+        if (result.queuePosition != null) {
+          _errorMessage =
+              '${_errorMessage!} Bạn đang xếp hàng, vị trí #${result.queuePosition}. Hãy thử đăng nhập lại sau vài phút.';
+        }
         _updateDownloadUrl =
             result.forceUpdate ? result.downloadUrl : null;
       });
@@ -204,6 +210,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
           _connectedMachineName = null;
           _connectedFullName = null;
           _isViewer = false;
+          _queuePosition = null;
         });
       }
       return;
@@ -220,6 +227,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       _connectedFullName = null;
       _connectedAt = null;
       _isViewer = false;
+          _queuePosition = null;
 
       if (widget.connectHandler == null) {
         await rustDeskWinManager.closeAllSubWindows();
@@ -239,6 +247,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       _connectedFullName = null;
       _connectedAt = null;
       _isViewer = false;
+          _queuePosition = null;
       if (widget.connectHandler == null) {
         await rustDeskWinManager.closeAllSubWindows();
       }
@@ -270,6 +279,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
         _connectedMachineName = null;
         _connectedFullName = null;
         _isViewer = false;
+          _queuePosition = null;
         _isLoading = false;
       });
     }
@@ -454,6 +464,20 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
               color: isDark ? Colors.white60 : Colors.black54,
             ),
           ),
+          if (_queuePosition != null) ...[
+            const SizedBox(height: 6),
+            Text(
+              _queuePosition == 1
+                  ? 'Bạn là người tiếp theo trong hàng đợi.'
+                  : 'Vị trí của bạn trong hàng đợi: #$_queuePosition',
+              textAlign: TextAlign.center,
+              style: const TextStyle(
+                fontSize: 12.5,
+                fontWeight: FontWeight.w600,
+                color: Colors.blueAccent,
+              ),
+            ),
+          ],
         ],
         const SizedBox(height: 8),
         Text(

@@ -83,6 +83,7 @@ function freeSessionRow(row, headers) {
   setSessionCell(row, headers, 'started_at', '');
   setSessionCell(row, headers, 'admin_action', '');
   setSessionCell(row, headers, 'last_seen', '');
+  setSessionCell(row, headers, 'expires_at', '');
 }
 
 function parseTime(value) {
@@ -101,18 +102,33 @@ function reapStaleSessions() {
   const headers = data[0];
   const statusCol = headers.indexOf('status');
   const lastSeenCol = headers.indexOf('last_seen');
+  const expiresAtCol = headers.indexOf('expires_at');
   if (statusCol === -1 || lastSeenCol === -1) return false;
 
   const cutoff = Date.now() - SESSION_TIMEOUT_MS;
+  const nowMs = Date.now();
   let changed = false;
   for (let r = 1; r < data.length; r++) {
     if (String(data[r][statusCol]).trim().toLowerCase() !== 'occupied') continue;
+    const studentId = data[r][headers.indexOf('student_id')];
+    const machineId = data[r][headers.indexOf('machine_id')];
+    const fullName = data[r][headers.indexOf('full_name')] || '';
+
+    // Per-session time limit (Config!max_minutes), separate from the
+    // heartbeat check below - a student who is actively polling can still
+    // be over their allotted time.
+    const expiresAt = expiresAtCol === -1 ? 0 : parseTime(data[r][expiresAtCol]);
+    if (expiresAt && nowMs >= expiresAt) {
+      writeAuditLog(studentId, machineId, 'expired', fullName + ' - Time limit reached');
+      freeSessionRow(r + 1, headers);
+      changed = true;
+      continue;
+    }
+
     const seen = parseTime(data[r][lastSeenCol]) ||
         parseTime(data[r][headers.indexOf('started_at')]);
     if (seen === 0 || seen > cutoff) continue;
-    writeAuditLog(data[r][headers.indexOf('student_id')],
-        data[r][headers.indexOf('machine_id')], 'expired',
-        (data[r][headers.indexOf('full_name')] || '') + ' - No heartbeat');
+    writeAuditLog(studentId, machineId, 'expired', fullName + ' - No heartbeat');
     freeSessionRow(r + 1, headers);
     changed = true;
   }
@@ -148,6 +164,54 @@ function compareVersions(a, b) {
     if (diff !== 0) return diff;
   }
   return 0;
+}
+
+// Optional `Queue` sheet (student_id | full_name | machine_id | requested_at)
+// for students who hit a fully-occupied machine. No live push notification -
+// a queued student has to try logging in again; this only tracks position so
+// they know roughly how many people are ahead of them, and de-dupes repeat
+// attempts from the same student instead of stacking duplicate entries.
+function queuePositionFor(machineId, studentId, fullName) {
+  const sheet = getSheet('Queue');
+  if (!sheet) return null;
+  const data = sheet.getDataRange().getValues();
+  const headers = data.length ? data[0] : ['student_id', 'full_name', 'machine_id', 'requested_at'];
+  const sidCol = headers.indexOf('student_id');
+  const midCol = headers.indexOf('machine_id');
+  if (sidCol === -1 || midCol === -1) return null;
+
+  const forMachine = [];
+  let existingIdx = -1;
+  for (let r = 1; r < data.length; r++) {
+    if (String(data[r][midCol]).trim() !== String(machineId).trim()) continue;
+    forMachine.push(data[r]);
+    if (String(data[r][sidCol]).trim() === String(studentId).trim()) {
+      existingIdx = forMachine.length - 1;
+    }
+  }
+  if (existingIdx !== -1) return existingIdx + 1;
+
+  sheet.appendRow([studentId, fullName, machineId, now()]);
+  return forMachine.length + 1;
+}
+
+function dequeueStudent(machineId, studentId) {
+  const sheet = getSheet('Queue');
+  if (!sheet) return;
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return;
+  const headers = data[0];
+  const sidCol = headers.indexOf('student_id');
+  const midCol = headers.indexOf('machine_id');
+  if (sidCol === -1 || midCol === -1) return;
+  // Delete bottom-up so row indices already removed don't shift the ones
+  // still to be checked.
+  for (let r = data.length - 1; r >= 1; r--) {
+    if (String(data[r][midCol]).trim() === String(machineId).trim() &&
+        String(data[r][sidCol]).trim() === String(studentId).trim()) {
+      sheet.deleteRow(r + 1);
+    }
+  }
 }
 
 // ----- API handlers -----
@@ -341,11 +405,16 @@ function handleLogin(body) {
         machine_pass: occupiedFallback.data['machine_pass'] || '',
         full_name: full_name,
         latest_version: config.latest_version || '',
-        download_url: config.download_url || ''
+        download_url: config.download_url || '',
+        queue_position: queuePositionFor(machineId, student_id, full_name)
       });
     }
     writeAuditLog(student_id, body.machine_id || '', 'login_denied', 'No free machine');
-    return jsonResponse({ allowed: false, reason: 'Hiện không còn máy trống. Vui lòng thử lại sau.' });
+    return jsonResponse({
+      allowed: false,
+      reason: 'Hiện không còn máy trống. Vui lòng thử lại sau.',
+      queue_position: body.machine_id ? queuePositionFor(body.machine_id, student_id, full_name) : null
+    });
   }
 
   // Allocate the session
@@ -358,6 +427,20 @@ function handleLogin(body) {
   setSessionCell(targetRow.row, sessHeaders, 'started_at', now());
   setSessionCell(targetRow.row, sessHeaders, 'admin_action', '');
   setSessionCell(targetRow.row, sessHeaders, 'last_seen', now());
+
+  // Per-session time limit (Config!max_minutes, optional - absent/invalid
+  // means no limit, same as today). reapStaleSessions() enforces this on the
+  // next status() poll, same path as the no-heartbeat timeout.
+  ensureColumn('ActiveSessions', 'expires_at');
+  const maxMinutes = parseInt(config.max_minutes, 10);
+  if (maxMinutes > 0) {
+    setSessionCell(targetRow.row, sessHeaders, 'expires_at',
+        new Date(Date.now() + maxMinutes * 60 * 1000).toISOString());
+  }
+
+  // This student no longer needs their spot in line for this machine, if
+  // they had one (view-mode join or an earlier denied attempt).
+  dequeueStudent(machineId, student_id);
 
   writeAuditLog(student_id, machineId, 'login_allowed', full_name);
 
@@ -389,16 +472,27 @@ function handleStatus(params) {
   }
 
   const adminAction = String(found.data['admin_action'] || '').trim().toLowerCase();
+  const studentId = found.data['student_id'];
+  const machineId = found.data['machine_id'];
 
   if (adminAction === 'kick') {
     // Process the kick
-    const studentId = found.data['student_id'];
-    const machineId = found.data['machine_id'];
     freeSessionRow(found.row, found.headers);
 
     writeAuditLog(studentId, machineId, 'kicked',
         (found.data['full_name'] || studentId) + ' - Admin kick');
     return jsonResponse({ status: 'kicked' });
+  }
+
+  // Time-limit expiry has to be caught here, not just in reapStaleSessions():
+  // a student who is actively polling never goes heartbeat-stale, so that
+  // path alone would never end their session at Config!max_minutes.
+  const expiresAt = parseTime(found.data['expires_at']);
+  if (expiresAt && Date.now() >= expiresAt) {
+    freeSessionRow(found.row, found.headers);
+    writeAuditLog(studentId, machineId, 'expired',
+        (found.data['full_name'] || studentId) + ' - Time limit reached');
+    return jsonResponse({ status: 'expired' });
   }
 
   setSessionCell(found.row, found.headers, 'last_seen', now());

@@ -53,6 +53,25 @@
 >   sau ~90 ngày).
 > - So khớp version: 2 số càng nhiều đoạn `.` càng chi tiết (`1.2.0` < `1.10.0`
 >   đúng theo số, không so như chuỗi ký tự).
+>
+> Thêm key `max_minutes` (số phút) vào cùng sheet `Config` để giới hạn thời
+> gian mỗi phiên — hết giờ, client tự bị đăng xuất ở lần poll kế tiếp (≤12s),
+> y hệt cơ chế mất kết nối 60s đã có. Không thêm key này = không giới hạn
+> giờ, như hiện tại.
+
+### Sheet 5: `Queue` (optional — hàng đợi)
+
+| student_id | full_name | machine_id | requested_at |
+|-----------|-----------|-----------|--------------|
+
+> Tùy chọn — nếu không tạo, sinh viên vào chế độ xem như bình thường,
+> chỉ không có số thứ tự. Nếu tạo (chỉ cần header row, script tự ghi):
+> khi máy đang bận, sinh viên login được vào **chế độ xem** kèm số thứ tự
+> hàng đợi (`Vị trí của bạn: #2`). **Không có thông báo đẩy** — sinh viên
+> phải tự thử đăng nhập lại vài phút sau để kiểm tra máy đã trống chưa;
+> đây là hàng đợi đơn giản cho MVP, không phải đặt chỗ tự động.
+> Khi 1 sinh viên trong hàng đợi login thành công (vào được với vai trò
+> điều khiển), họ tự được xoá khỏi `Queue`; những người còn lại không đổi.
 
 ## 3. Add the Apps Script
 
