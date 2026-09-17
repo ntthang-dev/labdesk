@@ -730,5 +730,16 @@ console.log('  -- 22c. no group column at all -> everyone can view, exactly as b
   check('anyone can view when groups are not configured', res.allowed === true && res.mode === 'view', JSON.stringify(res));
 }
 
+console.log('=== 23. action=version needs no secret (deployment self-check) ===');
+{
+  const sheets = freshSheets();
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  const noSecret = call(sb, 'doGet', { parameter: { action: 'version' } });
+  check('version works with no secret at all', typeof noSecret.code_version === 'string' && noSecret.code_version.length > 0, JSON.stringify(noSecret));
+  check('version lists features', Array.isArray(noSecret.features) && noSecret.features.includes('schedule_booking'), JSON.stringify(noSecret));
+  const wrongSecret = call(sb, 'doGet', { parameter: { action: 'version', secret: 'nope' } });
+  check('version works even with a wrong secret', typeof wrongSecret.code_version === 'string', JSON.stringify(wrongSecret));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

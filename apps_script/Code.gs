@@ -15,6 +15,16 @@
 const PROPS = PropertiesService.getScriptProperties();
 const SHARED_SECRET = PROPS.getProperty('SHARED_SECRET') || 'change-me';
 
+// Bump this string whenever a deployed feature set changes. `action=version`
+// (doGet, no secret required - see below) exists purely so an admin can
+// confirm "did my copy-paste + New version deploy actually take effect?"
+// with a single URL in a browser tab, without hunting for SHARED_SECRET
+// first. Only ever returns this static string + a feature list, never any
+// sheet data, so it deliberately skips the secret check that guards every
+// other action.
+const CODE_VERSION = '2026-09-18-schedule-feedback-group';
+const CODE_FEATURES = ['view_only_queue', 'expires_at_countdown', 'group_restricted_view', 'schedule_booking', 'feedback', 'version_gate'];
+
 // A client polls `status` every ~12s. If nothing has been heard for this long the
 // student's machine died or the app was force-quit, so the slot is reclaimed.
 const SESSION_TIMEOUT_MS = 60 * 1000;
@@ -534,6 +544,11 @@ function doGet(e) {
   try {
     const action = e.parameter.action;
     const secret = e.parameter.secret;
+
+    // No secret check here on purpose - see CODE_VERSION comment above.
+    if (action === 'version') {
+      return jsonResponse({ code_version: CODE_VERSION, features: CODE_FEATURES });
+    }
 
     if (secret !== SHARED_SECRET) {
       return jsonResponse({ error: 'unauthorized' }, 403);
