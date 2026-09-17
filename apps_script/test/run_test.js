@@ -517,5 +517,33 @@ console.log('=== 16. Trailing/leading whitespace in sheet cells never reaches th
   check('view-mode machine_pass also trimmed', res2.machine_pass === 'PTNhtd@2026', JSON.stringify(res2));
 }
 
+console.log('=== 17. Viewer sees who to contact; controller sees own countdown ===');
+{
+  const sheets = freshSheets();
+  sheets.Config = new FakeSheet(['key', 'value'], [['max_minutes', '60']]);
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+
+  const controller = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'ctrl1', full_name: 'Controller Person', secret: 'S3CR3T' }) },
+  });
+  check('controller response carries expires_at (session timer)', !!controller.expires_at, JSON.stringify(controller));
+
+  const viewer = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'view1', full_name: 'Viewer Person', secret: 'S3CR3T' }) },
+  });
+  check('viewer sees the controller\'s name to contact them', viewer.controller_name === 'Controller Person', JSON.stringify(viewer));
+  check('viewer sees the controller\'s student_id too', viewer.controller_student_id === 'ctrl1', JSON.stringify(viewer));
+  check('viewer sees the same expires_at as the controller', viewer.expires_at === controller.expires_at, JSON.stringify(viewer));
+}
+console.log('  -- 17a. no Config -> expires_at is empty, not an error --');
+{
+  const sheets = freshSheets();
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  const res = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: '1', full_name: 'A', secret: 'S3CR3T' }) },
+  });
+  check('no time limit configured -> expires_at is empty string', res.expires_at === '', JSON.stringify(res));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

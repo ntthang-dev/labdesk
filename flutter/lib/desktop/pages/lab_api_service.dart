@@ -121,6 +121,9 @@ class LoginResult {
   final String? downloadUrl;
   final String? latestVersion;
   final int? queuePosition;
+  final String? controllerName;
+  final String? controllerStudentId;
+  final DateTime? expiresAt;
 
   bool get isViewOnly => mode == 'view';
   bool get updateAvailable =>
@@ -155,6 +158,9 @@ class LoginResult {
     this.downloadUrl,
     this.latestVersion,
     this.queuePosition,
+    this.controllerName,
+    this.controllerStudentId,
+    this.expiresAt,
   });
 
   factory LoginResult.fromJson(Map<String, dynamic> json) {
@@ -175,6 +181,11 @@ class LoginResult {
       downloadUrl: json['download_url'] as String?,
       latestVersion: json['latest_version'] as String?,
       queuePosition: json['queue_position'] is int ? json['queue_position'] as int : null,
+      controllerName: json['controller_name'] as String?,
+      controllerStudentId: json['controller_student_id'] as String?,
+      expiresAt: (json['expires_at'] is String && (json['expires_at'] as String).isNotEmpty)
+          ? DateTime.tryParse(json['expires_at'] as String)
+          : null,
     );
   }
 

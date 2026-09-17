@@ -38,6 +38,11 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
   bool _isViewer = false;
   String? _updateDownloadUrl; // set when force_update or updateAvailable
   int? _queuePosition;
+  String? _controllerName;
+  String? _controllerStudentId;
+  DateTime? _expiresAt;
+  Timer? _countdownTimer;
+  Duration? _timeRemaining;
 
   @override
   void initState() {
@@ -54,6 +59,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       windowManager.removeListener(this);
     }
     _pollTimer?.cancel();
+    _countdownTimer?.cancel();
     _nameController.dispose();
     _studentIdController.dispose();
     super.dispose();
@@ -82,7 +88,8 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
 
     if (!LabConfig.isConfigured) {
       setState(() {
-        _errorMessage = 'Hệ thống phòng lab đang bận hoặc chưa sẵn sàng. Vui lòng liên hệ Quản trị viên.';
+        _errorMessage =
+            'Hệ thống phòng lab đang bận hoặc chưa sẵn sàng. Vui lòng liên hệ Quản trị viên.';
       });
       return;
     }
@@ -127,6 +134,10 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       _isViewer = result.isViewOnly;
       _updateDownloadUrl = result.updateAvailable ? result.downloadUrl : null;
       _queuePosition = result.queuePosition;
+      _controllerName = result.controllerName;
+      _controllerStudentId = result.controllerStudentId;
+      _expiresAt = result.expiresAt;
+      _startCountdown();
 
       // `view-only` is a per-peer setting RustDesk itself enforces (blocks
       // sending keyboard/mouse before the first frame - see
@@ -171,8 +182,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
           _errorMessage =
               '${_errorMessage!} Bạn đang xếp hàng, vị trí #${result.queuePosition}. Hãy thử đăng nhập lại sau vài phút.';
         }
-        _updateDownloadUrl =
-            result.forceUpdate ? result.downloadUrl : null;
+        _updateDownloadUrl = result.forceUpdate ? result.downloadUrl : null;
       });
     }
   }
@@ -183,6 +193,28 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
     _pollTimer = Timer.periodic(const Duration(seconds: 12), (_) async {
       await _pollStatus();
     });
+  }
+
+  // Server enforces the actual time limit (Code.gs' expires_at check in
+  // handleStatus); this is purely so the student can *see* it coming instead
+  // of being disconnected with no warning.
+  void _startCountdown() {
+    _countdownTimer?.cancel();
+    final expiresAt = _expiresAt;
+    if (expiresAt == null) {
+      setState(() => _timeRemaining = null);
+      return;
+    }
+    void tick() {
+      final remaining = expiresAt.difference(DateTime.now());
+      if (mounted) {
+        setState(() =>
+            _timeRemaining = remaining.isNegative ? Duration.zero : remaining);
+      }
+    }
+
+    tick();
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (_) => tick());
   }
 
   Future<void> _pollStatus() async {
@@ -211,6 +243,11 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
           _connectedFullName = null;
           _isViewer = false;
           _queuePosition = null;
+          _controllerName = null;
+          _controllerStudentId = null;
+          _expiresAt = null;
+          _countdownTimer?.cancel();
+          _timeRemaining = null;
         });
       }
       return;
@@ -227,7 +264,12 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       _connectedFullName = null;
       _connectedAt = null;
       _isViewer = false;
-          _queuePosition = null;
+      _queuePosition = null;
+      _controllerName = null;
+      _controllerStudentId = null;
+      _expiresAt = null;
+      _countdownTimer?.cancel();
+      _timeRemaining = null;
 
       if (widget.connectHandler == null) {
         await rustDeskWinManager.closeAllSubWindows();
@@ -247,7 +289,12 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       _connectedFullName = null;
       _connectedAt = null;
       _isViewer = false;
-          _queuePosition = null;
+      _queuePosition = null;
+      _controllerName = null;
+      _controllerStudentId = null;
+      _expiresAt = null;
+      _countdownTimer?.cancel();
+      _timeRemaining = null;
       if (widget.connectHandler == null) {
         await rustDeskWinManager.closeAllSubWindows();
       }
@@ -279,7 +326,12 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
         _connectedMachineName = null;
         _connectedFullName = null;
         _isViewer = false;
-          _queuePosition = null;
+        _queuePosition = null;
+        _controllerName = null;
+        _controllerStudentId = null;
+        _expiresAt = null;
+        _countdownTimer?.cancel();
+        _timeRemaining = null;
         _isLoading = false;
       });
     }
@@ -439,6 +491,44 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
     );
   }
 
+  // Purely informational - handleStatus() in Code.gs is what actually ends
+  // the session at expires_at. This just gives the student advance warning
+  // instead of being cut off with no clock to have watched.
+  Widget _buildCountdown(bool isDark) {
+    final remaining = _timeRemaining!;
+    final minutes = remaining.inMinutes;
+    final seconds = remaining.inSeconds % 60;
+    final label =
+        '${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
+    final low = remaining.inMinutes < 5;
+    final color =
+        low ? Colors.orange : (isDark ? Colors.white70 : Colors.black54);
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+      decoration: BoxDecoration(
+        color: low ? Colors.orange.withOpacity(0.12) : Colors.transparent,
+        borderRadius: BorderRadius.circular(8),
+        border: low ? Border.all(color: Colors.orange.withOpacity(0.4)) : null,
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(Icons.timer_outlined, size: 15, color: color),
+          const SizedBox(width: 6),
+          Text(
+            low
+                ? 'Phiên sắp hết hạn: còn $label'
+                : 'Thời gian phiên còn lại: $label',
+            style: TextStyle(
+                color: color,
+                fontSize: 12.5,
+                fontWeight: low ? FontWeight.w700 : FontWeight.w500),
+          ),
+        ],
+      ),
+    );
+  }
+
   Widget _buildActiveSessionView(BuildContext context, bool isDark) {
     final accent = _isViewer ? Colors.blueAccent : Colors.green;
     return Column(
@@ -451,13 +541,17 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
         ),
         const SizedBox(height: 16),
         Text(
-          _isViewer ? 'Đang xem (không điều khiển được)' : 'Đang trong phiên kết nối',
+          _isViewer
+              ? 'Đang xem (không điều khiển được)'
+              : 'Đang trong phiên kết nối',
           style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
         ),
         if (_isViewer) ...[
           const SizedBox(height: 6),
           Text(
-            'Máy đang có bạn khác điều khiển. Bạn chỉ xem được màn hình, không gõ phím hay dùng chuột được.',
+            (_controllerName ?? '').isNotEmpty
+                ? 'Đang được điều khiển bởi: $_controllerName${_controllerStudentId != null ? " ($_controllerStudentId)" : ""}. Bạn chỉ xem được màn hình, không gõ phím hay dùng chuột được.'
+                : 'Máy đang có bạn khác điều khiển. Bạn chỉ xem được màn hình, không gõ phím hay dùng chuột được.',
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: 12.5,
@@ -493,6 +587,10 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
           'Sinh viên: ${_connectedFullName ?? _nameController.text} (${_studentIdController.text})',
           style: const TextStyle(fontSize: 13, color: Colors.grey),
         ),
+        if (_timeRemaining != null) ...[
+          const SizedBox(height: 14),
+          _buildCountdown(isDark),
+        ],
         const SizedBox(height: 20),
         Container(
           padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
@@ -568,7 +666,8 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
                 ? const SizedBox(
                     width: 20,
                     height: 20,
-                    child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white))
+                    child: CircularProgressIndicator(
+                        strokeWidth: 2, color: Colors.white))
                 : Text(_isViewer ? 'Rời khỏi' : 'Ngắt kết nối & Đăng xuất',
                     style: const TextStyle(fontWeight: FontWeight.bold)),
           ),
@@ -718,8 +817,9 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
               fillColor:
                   isDark ? const Color(0xFF1E1E2E) : const Color(0xFFF5F5F7),
             ),
-            validator: (v) =>
-                (v == null || v.trim().isEmpty) ? 'Vui lòng nhập họ và tên' : null,
+            validator: (v) => (v == null || v.trim().isEmpty)
+                ? 'Vui lòng nhập họ và tên'
+                : null,
             textInputAction: TextInputAction.next,
             enabled: !_isLoading,
           ),
@@ -762,8 +862,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
               ),
               child: Row(
                 children: [
-                  const Icon(Icons.error_outline,
-                      color: Colors.red, size: 20),
+                  const Icon(Icons.error_outline, color: Colors.red, size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Column(
@@ -833,8 +932,8 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
                     )
                   : const Text(
                       'Đăng nhập vào phòng Lab',
-                      style: TextStyle(
-                          fontSize: 16, fontWeight: FontWeight.w600),
+                      style:
+                          TextStyle(fontSize: 16, fontWeight: FontWeight.w600),
                     ),
             ),
           ),

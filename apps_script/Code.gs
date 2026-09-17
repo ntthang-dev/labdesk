@@ -459,7 +459,12 @@ function handleLogin(body) {
         full_name: full_name,
         latest_version: config.latest_version || '',
         download_url: config.download_url || '',
-        queue_position: queuePositionFor(machineId, student_id, full_name)
+        queue_position: queuePositionFor(machineId, student_id, full_name),
+        // So a viewer knows who to contact, and can see the same countdown
+        // the controller sees.
+        controller_name: controllerName,
+        controller_student_id: occupiedFallback.data['student_id'],
+        expires_at: occupiedFallback.data['expires_at'] || ''
       });
     }
     writeAuditLog(student_id, body.machine_id || '', 'login_denied', 'No free machine');
@@ -486,9 +491,10 @@ function handleLogin(body) {
   // next status() poll, same path as the no-heartbeat timeout.
   ensureColumn('ActiveSessions', 'expires_at');
   const maxMinutes = parseInt(config.max_minutes, 10);
+  let expiresAtIso = '';
   if (maxMinutes > 0) {
-    setSessionCell(targetRow.row, sessHeaders, 'expires_at',
-        new Date(Date.now() + maxMinutes * 60 * 1000).toISOString());
+    expiresAtIso = new Date(Date.now() + maxMinutes * 60 * 1000).toISOString();
+    setSessionCell(targetRow.row, sessHeaders, 'expires_at', expiresAtIso);
   }
 
   // This student no longer needs their spot in line for this machine, if
@@ -507,7 +513,8 @@ function handleLogin(body) {
     // shows the official name rather than whatever was typed at login.
     full_name: full_name,
     latest_version: config.latest_version || '',
-    download_url: config.download_url || ''
+    download_url: config.download_url || '',
+    expires_at: expiresAtIso
   });
 }
 
