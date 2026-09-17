@@ -8,12 +8,21 @@
 ## 2. Create Sheets (tabs)
 
 ### Sheet 1: `Students` (optional — for whitelist)
-| student_id | full_name | status |
-|-----------|-----------|--------|
-| 20210001  | Nguyen Van A | active |
-| 20210002  | Tran Thi B | active |
+| student_id | full_name | status | group |
+|-----------|-----------|--------|-------|
+| 20210001  | Nguyen Van A | active | Nhom1 |
+| 20210002  | Tran Thi B | active | Nhom1 |
 
 > If you don't need whitelist validation, skip this sheet. The script will still work.
+>
+> Cột `group` là **tùy chọn**. Nếu không tạo cột này, mọi sinh viên đều xem
+> được máy đang bận (chế độ xem) như hiện tại — không có gì thay đổi. Nếu
+> tạo cột `group` và điền giá trị (vd tên nhóm/lớp thực hành), sinh viên
+> **khác nhóm** với người đang điều khiển máy sẽ **không vào được chế độ
+> xem** của máy đó nữa (bị từ chối với lý do "Máy đang có sinh viên nhóm
+> khác sử dụng"), còn sinh viên **cùng nhóm** vẫn xem được và thấy tên người
+> đang điều khiển để liên hệ. Dùng khi nhiều nhóm thực hành dùng chung dãy
+> máy và không muốn nhóm này nhìn thấy nhóm kia đang làm gì.
 
 ### Sheet 2: `ActiveSessions`
 **Pre-populate one row per lab machine:**
@@ -78,6 +87,39 @@
 > đây là hàng đợi đơn giản cho MVP, không phải đặt chỗ tự động.
 > Khi 1 sinh viên trong hàng đợi login thành công (vào được với vai trò
 > điều khiển), họ tự được xoá khỏi `Queue`; những người còn lại không đổi.
+
+### Sheet 6: `Schedule` (tự tạo — đặt lịch dùng máy theo tuần)
+
+> **Không cần tạo tay** — script tự tạo sheet này (kèm header) lần đầu có
+> ai đó gọi tính năng đặt lịch. Header tự sinh:
+> `date, time_slot, machine_id, student_id, full_name, status, created_at`.
+>
+> Cấu hình khung giờ đặt lịch qua sheet `Config` (mục 4), thêm các key:
+> - `slot_start_hour` (mặc định 7): giờ mở cửa lab, ví dụ `7` = 7:00
+> - `slot_end_hour` (mặc định 19): giờ đóng cửa, ví dụ `19` = 19:00
+> - `slot_duration_minutes` (mặc định 120): độ dài mỗi khung giờ đặt, tính
+>   bằng phút — ví dụ `120` chia ngày thành các khung `07:00-09:00`,
+>   `09:00-11:00`, ...
+> - `booking_days_ahead` (mặc định 7): cho phép đặt trước tối đa bao nhiêu
+>   ngày kể từ hôm nay.
+>
+> Sinh viên đặt 1 khung giờ cho 1 máy cụ thể qua nút "Đặt lịch dùng máy"
+> trong app. Khi tới đúng khung giờ đã đặt, nếu có sinh viên **khác** (không
+> phải người đặt) cố đăng nhập vào **đúng máy đó**, họ sẽ bị bỏ qua trong
+> lượt quét tìm máy trống — máy đó coi như "đã có chủ" cho khung giờ này,
+> dù đang `free` trên `ActiveSessions`. Người đã đặt vẫn đăng nhập bình
+> thường vào đúng máy của mình. Không đặt lịch = hành vi y hệt hiện tại
+> (ai vào trước dùng trước).
+>
+> Không tạo `Config!slot_*` cũng không sao — script dùng giá trị mặc định
+> ở trên, tính năng đặt lịch vẫn hoạt động.
+
+### Sheet 7: `Feedback` (tự tạo — góp ý từ sinh viên)
+
+> **Không cần tạo tay** — script tự tạo khi có sinh viên gửi góp ý lần đầu
+> qua nút "Gửi góp ý" trong app. Header tự sinh:
+> `timestamp, student_id, full_name, message`. Mở sheet này để đọc góp ý;
+> không cần làm gì thêm, không có xử lý tự động nào khác trên dữ liệu này.
 
 ## 3. Add the Apps Script
 

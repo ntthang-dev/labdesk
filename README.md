@@ -1,40 +1,47 @@
-<p align="center">
-  <img src="res/logo-header.svg" alt="RustDesk - Your remote desktop"><br>
-  <a href="#raw-steps-to-build">Build</a> •
-  <a href="#how-to-build-with-docker">Docker</a> •
-  <a href="#file-structure">Structure</a> •
-  <a href="#screenshots">Screenshots</a><br>
-  [<a href="docs/README-UA.md">Українська</a>] | [<a href="docs/README-CS.md">česky</a>] | [<a href="docs/README-ZH.md">中文</a>] | [<a href="docs/README-HU.md">Magyar</a>] | [<a href="docs/README-ES.md">Español</a>] | [<a href="docs/README-FA.md">فارسی</a>] | [<a href="docs/README-FR.md">Français</a>] | [<a href="docs/README-DE.md">Deutsch</a>] | [<a href="docs/README-PL.md">Polski</a>] | [<a href="docs/README-ID.md">Indonesian</a>] | [<a href="docs/README-FI.md">Suomi</a>] | [<a href="docs/README-ML.md">മലയാളം</a>] | [<a href="docs/README-JP.md">日本語</a>] | [<a href="docs/README-NL.md">Nederlands</a>] | [<a href="docs/README-IT.md">Italiano</a>] | [<a href="docs/README-RU.md">Русский</a>] | [<a href="docs/README-PTBR.md">Português (Brasil)</a>] | [<a href="docs/README-EO.md">Esperanto</a>] | [<a href="docs/README-KR.md">한국어</a>] | [<a href="docs/README-AR.md">العربي</a>] | [<a href="docs/README-VN.md">Tiếng Việt</a>] | [<a href="docs/README-DA.md">Dansk</a>] | [<a href="docs/README-GR.md">Ελληνικά</a>] | [<a href="docs/README-TR.md">Türkçe</a>] | [<a href="docs/README-NO.md">Norsk</a>] | [<a href="docs/README-RO.md">Română</a>]<br>
-  <b>We need your help to translate this README, <a href="https://github.com/rustdesk/rustdesk/tree/master/src/lang">RustDesk UI</a> and <a href="https://github.com/rustdesk/doc.rustdesk.com">RustDesk Doc</a> to your native language</b>
-</p>
+# LabDesk
+
+**LabDesk** là bản tùy biến của [RustDesk](https://github.com/rustdesk/rustdesk)
+dành riêng cho việc quản lý truy cập máy tính phòng lab của trường/khoa. Sinh
+viên chỉ cần nhập **Họ tên + MSSV**, hệ thống tự xác thực, tự cấp máy trống,
+tự kết nối — không cần biết IP, mật khẩu, hay bất kỳ cấu hình RustDesk nào.
+
+- **Máy lab (host):** chạy RustDesk gốc, không sửa gì — an toàn, dễ cập nhật theo upstream.
+- **Máy sinh viên (client):** chạy `LabDesk`, một bản Flutter UI riêng thay thế màn hình RustDesk mặc định.
+- **Backend:** Google Sheets + Google Apps Script (miễn phí, không cần server riêng) — xem `apps_script/`.
+- **Build/CI:** GitHub Actions tự build `.exe` (Windows) và `.dmg` (macOS) mỗi khi có thay đổi — xem `.github/workflows/lab-client-build.yml`.
+
+### Tài liệu
+
+| Muốn biết... | Đọc file |
+|---|---|
+| Kiến trúc hệ thống, lịch sử các bản sửa | [`CHANGELOG.md`](CHANGELOG.md) |
+| Cách vận hành hằng ngày (kick sinh viên, đổi mật khẩu máy, SmartScreen Windows...) | [`HUONG_DAN_QUAN_TRI.md`](HUONG_DAN_QUAN_TRI.md) |
+| Cách dựng Sheets + Apps Script từ đầu | [`apps_script/SETUP.md`](apps_script/SETUP.md) |
+| Kiểm chứng hình thức (TLA+) cho luồng cấp phiên khi nhiều sinh viên đăng nhập cùng lúc | [`apps_script/formal/README.md`](apps_script/formal/README.md) |
+| Ý nghĩa "GitHub Release" và các artifact "bridge" trong CI | [`docs/RELEASES_AND_CI.md`](docs/RELEASES_AND_CI.md) |
+
+### Kiểm chứng nhanh
+
+```bash
+node apps_script/test/run_test.js                      # test logic backend, không cần tài khoản Google
+cd flutter && flutter test test/lab_client_test.dart    # test client Flutter
+```
+
+### Mã nguồn gốc: RustDesk
+
+Phần còn lại của README này là tài liệu **build/kiến trúc gốc của RustDesk**
+(vẫn đúng vì LabDesk build trên cùng codebase), giữ lại cho ai cần dựng lại
+từ mã nguồn hoặc đóng góp vào phần lõi remote-desktop.
 
 > [!Caution]
 > **Misuse Disclaimer:** <br>
 > The developers of RustDesk do not condone or support any unethical or illegal use of this software. Misuse, such as unauthorized access, control or invasion of privacy, is strictly against our guidelines. The authors are not responsible for any misuse of the application.
 
-
-Chat with us: [Discord](https://discord.gg/nDceKgxnkV) | [Twitter](https://twitter.com/rustdesk) | [Reddit](https://www.reddit.com/r/rustdesk) | [YouTube](https://www.youtube.com/@rustdesk)
-
-[![RustDesk Server Pro](https://img.shields.io/badge/RustDesk%20Server%20Pro-Advanced%20Features-blue)](https://rustdesk.com/pricing.html)
-
 Yet another remote desktop solution, written in Rust. Works out of the box with no configuration required. You have full control of your data, with no concerns about security. You can use our rendezvous/relay server, [set up your own](https://rustdesk.com/server), or [write your own rendezvous/relay server](https://github.com/rustdesk/rustdesk-server-demo).
-
-![image](https://user-images.githubusercontent.com/71636191/171661982-430285f0-2e12-4b1d-9957-4a58e375304d.png)
 
 RustDesk welcomes contribution from everyone. See [CONTRIBUTING.md](docs/CONTRIBUTING.md) for help getting started.
 
-[**FAQ**](https://github.com/rustdesk/rustdesk/wiki/FAQ)
-
-[**BINARY DOWNLOAD**](https://github.com/rustdesk/rustdesk/releases)
-
-[**NIGHTLY BUILD**](https://github.com/rustdesk/rustdesk/releases/tag/nightly)
-
-[<img src="https://f-droid.org/badge/get-it-on.png"
-    alt="Get it on F-Droid"
-    height="80">](https://f-droid.org/en/packages/com.carriez.flutter_hbb)
-[<img src="https://flathub.org/api/badge?svg&locale=en"
-    alt="Get it on Flathub"
-    height="80">](https://flathub.org/apps/com.rustdesk.RustDesk)
+[**Upstream project**](https://github.com/rustdesk/rustdesk) · [**Upstream releases**](https://github.com/rustdesk/rustdesk/releases)
 
 ## Dependencies
 
