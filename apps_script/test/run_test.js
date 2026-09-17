@@ -687,5 +687,44 @@ console.log('  -- 21c. no Schedule sheet -> first-come-first-served exactly as b
   check('login works normally with no Schedule sheet at all', res.allowed === true, JSON.stringify(res));
 }
 
+console.log('=== 22. Group-restricted viewing (opt-in via Students!group column) ===');
+{
+  const sheets = freshSheets();
+  sheets.Students = new FakeSheet(
+    ['student_id', 'full_name', 'status', 'group'],
+    [['ctrl', 'Controller', 'active', 'A'], ['same', 'Same Group', 'active', 'A'], ['other', 'Other Group', 'active', 'B']]
+  );
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+
+  const ctrl = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'ctrl', full_name: 'x', secret: 'S3CR3T' }) },
+  });
+  check('controller login allowed', ctrl.allowed === true, JSON.stringify(ctrl));
+
+  console.log('  -- 22a. different group cannot view --');
+  const other = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'other', full_name: 'x', secret: 'S3CR3T' }) },
+  });
+  check('different group denied view access', other.allowed === false, JSON.stringify(other));
+
+  console.log('  -- 22b. same group CAN view --');
+  const same = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'same', full_name: 'x', secret: 'S3CR3T' }) },
+  });
+  check('same group allowed to view', same.allowed === true && same.mode === 'view', JSON.stringify(same));
+}
+console.log('  -- 22c. no group column at all -> everyone can view, exactly as before --');
+{
+  const sheets = freshSheets(); // Students has no group column
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'ctrl', full_name: 'x', secret: 'S3CR3T' }) },
+  });
+  const res = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 'anyone', full_name: 'x', secret: 'S3CR3T' }) },
+  });
+  check('anyone can view when groups are not configured', res.allowed === true && res.mode === 'view', JSON.stringify(res));
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

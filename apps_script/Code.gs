@@ -132,6 +132,7 @@ function freeSessionRow(row, headers) {
   setSessionCell(row, headers, 'admin_action', '');
   setSessionCell(row, headers, 'last_seen', '');
   setSessionCell(row, headers, 'expires_at', '');
+  setSessionCell(row, headers, 'group', '');
 }
 
 function parseTime(value) {
@@ -590,6 +591,12 @@ function handleLogin(body) {
   }
 
   // (Optional) Check Students whitelist
+  // student_group stays '' unless the Students sheet actually has a
+  // `group` column - that column's mere presence is what turns on
+  // group-restricted viewing below (reservedForSomeoneElse's sibling
+  // check), same opt-in pattern as every other optional column here.
+  let student_group = '';
+  let groupsInUse = false;
   const studentsSheet = getSheet('Students');
   if (studentsSheet) {
     const students = studentsSheet.getDataRange().getValues();
@@ -598,6 +605,8 @@ function handleLogin(body) {
       const idCol = headers.indexOf('student_id');
       const statusCol = headers.indexOf('status');
       const nameCol = headers.indexOf('full_name');
+      const groupCol = headers.indexOf('group');
+      groupsInUse = groupCol !== -1;
       if (idCol !== -1) {
         const found = students.slice(1).find(r => String(r[idCol]).trim() === String(student_id).trim());
         if (!found) {
@@ -610,6 +619,9 @@ function handleLogin(body) {
         }
         if (nameCol !== -1 && String(found[nameCol]).trim()) {
           full_name = String(found[nameCol]).trim();
+        }
+        if (groupCol !== -1) {
+          student_group = String(found[groupCol] || '').trim();
         }
       }
     }
@@ -679,6 +691,21 @@ function handleLogin(body) {
   }
 
   if (!targetRow) {
+    // Group-restricted viewing (opt-in: only when Students has a `group`
+    // column at all - see groupsInUse above). Without this, any student can
+    // watch any session; with it, only classmates in the controller's own
+    // group can. Denied here rather than granted with a caveat, since
+    // silently watching someone outside your section is the failure mode
+    // that matters, not an inconvenience.
+    if (occupiedFallback && occupiedFallback.data['session_token'] &&
+        groupsInUse && (occupiedFallback.data['group'] || '') !== student_group) {
+      writeAuditLog(student_id, occupiedFallback.data['machine_id'], 'login_denied',
+          'View denied: different group (' + student_group + ' vs ' + occupiedFallback.data['group'] + ')');
+      return jsonResponse({
+        allowed: false,
+        reason: 'Máy đang có sinh viên nhóm khác sử dụng. Vui lòng thử máy khác hoặc chờ.'
+      });
+    }
     if (occupiedFallback && occupiedFallback.data['session_token']) {
       // Sheets data entry is human-typed and easy to leave a stray leading/
       // trailing space in (this is exactly how a real spreadsheet had one on
@@ -729,6 +756,13 @@ function handleLogin(body) {
   setSessionCell(targetRow.row, sessHeaders, 'started_at', now());
   setSessionCell(targetRow.row, sessHeaders, 'admin_action', '');
   setSessionCell(targetRow.row, sessHeaders, 'last_seen', now());
+
+  // Stashed on the row (not re-looked-up from Students at view-join time)
+  // so a viewer's group check below doesn't need a second Students scan.
+  if (groupsInUse) {
+    ensureColumn('ActiveSessions', 'group');
+    setSessionCell(targetRow.row, sessHeaders, 'group', student_group);
+  }
 
   // Per-session time limit (Config!max_minutes, optional - absent/invalid
   // means no limit, same as today). reapStaleSessions() enforces this on the

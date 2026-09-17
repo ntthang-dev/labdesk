@@ -24,6 +24,28 @@ find / -maxdepth 6 -iname "LabDesk.app" 2>/dev/null
 `/System/Volumes/Data/Applications/...` (nếu có) chỉ là cùng 1 file macOS
 tự liên kết, không phải bản khác.
 
+## Cài trên Windows bị chặn "Windows protected your PC" — làm sao?
+
+**Sự thật thẳng thắn:** không có cách nào loại bỏ hoàn toàn cảnh báo này nếu
+không **ký số (code signing)** file `.exe`, và ký số cần mua chứng chỉ
+(~100-400 USD/năm cho chứng chỉ thường, có "thời gian làm quen" trước khi
+Windows tin tưởng; ~300-600 USD/năm cho chứng chỉ EV thì tin tưởng ngay lập
+tức). Tôi không thể tự mua hộ bạn — đây là quyết định + chi phí bạn phải
+chọn nếu muốn xử lý tận gốc (mục **D3** trong kế hoạch nâng cấp).
+
+**Việc làm ngay được, miễn phí — hướng dẫn sinh viên 3 bước:**
+1. Chạy file `LabDesk-windows-x64.exe` → Windows hiện "Windows protected your PC"
+2. Bấm chữ **"More info"** (chữ nhỏ, dễ bỏ sót)
+3. Bấm nút **"Run anyway"** xuất hiện bên dưới
+
+Chỉ cần làm 1 lần — sau đó Windows nhớ và không hỏi lại với đúng file đó (hỏi
+lại nếu tải file mới sau khi bạn ra bản cập nhật).
+
+**Việc tôi có thể chuẩn bị sẵn** nếu bạn quyết định mua chứng chỉ sau này:
+CI đã có sẵn cấu trúc để thêm bước ký (`signtool.exe` + chứng chỉ lưu trong
+GitHub Secrets) — chỉ cần bạn có file `.pfx` và mật khẩu, báo tôi để nối vào
+pipeline, không cần đổi gì phía code app.
+
 ## Sheet `ActiveSessions` hoạt động ra sao?
 
 Đây **không phải log** — mỗi dòng là **trạng thái sống hiện tại** của 1 máy
