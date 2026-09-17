@@ -34,6 +34,26 @@
 
 > Data will be appended automatically by the script.
 
+### Sheet 4: `Config` (optional — remote update control)
+
+| key | value |
+|-----|-------|
+| min_version | 1.0.0 |
+| latest_version | 1.0.0 |
+| download_url | |
+
+> Toàn bộ sheet là tùy chọn — nếu không tạo, tính năng cập nhật từ xa tự tắt,
+> mọi client đều đăng nhập bình thường.
+> - `min_version`: client cũ hơn số này **bị chặn đăng nhập**, kèm nút tải bản mới.
+>   Dùng khi phải bắt buộc toàn bộ sinh viên lên bản mới (vd: vừa vá lỗi bảo mật).
+> - `latest_version`: client cũ hơn (nhưng vẫn ≥ `min_version`) chỉ thấy banner
+>   "có bản mới", vẫn dùng được bình thường.
+> - `download_url`: link tải bản mới nhất — nên trỏ tới **GitHub Release**
+>   (`gh release create v1.0.1 ...`), không dùng link `gh run download` (hết hạn
+>   sau ~90 ngày).
+> - So khớp version: 2 số càng nhiều đoạn `.` càng chi tiết (`1.2.0` < `1.10.0`
+>   đúng theo số, không so như chuỗi ký tự).
+
 ## 3. Add the Apps Script
 
 1. In the spreadsheet → **Extensions** → **Apps Script**
@@ -104,5 +124,17 @@ Expected: `{"success":true}`
 ## Sau khi sửa `Code.gs`
 
 Apps Script chỉ phục vụ phiên bản đã deploy. Mỗi lần dán code mới phải:
-**Deploy → Manage deployments → (biểu tượng bút chì) → Version: New version → Deploy**.
+**Deploy → Manage deployments → (biểu tượng bút chì ✏️ bên cạnh deployment đang có) → Version: New version → Deploy**.
 URL Web App giữ nguyên, không cần build lại client.
+
+> [!WARNING]
+> **Đừng bấm "Deploy" ở màn hình chính rồi chọn "New deployment"** — cái đó tạo
+> ra một **deployment hoàn toàn mới với URL khác**, không cập nhật cái đang
+> chạy. Lỗi này đã xảy ra nhiều lần: dán code mới xong tưởng đã xong, nhưng
+> app vẫn gọi vào URL cũ (code cũ). Luôn vào theo đường:
+> **Deploy → Manage deployments** (không phải nút Deploy to lớn ở góc trên) →
+> tìm deployment **đã có sẵn** → bấm ✏️ → **Version: New version**.
+>
+> Nếu lỡ tạo deployment mới: copy URL mới, báo lại để cập nhật
+> `LAB_API_URL` trong GitHub Secrets (`gh secret set LAB_API_URL --body "<url mới>"`)
+> rồi build lại app — nếu không app vẫn gọi vào URL cũ.

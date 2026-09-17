@@ -4,6 +4,16 @@ Tài liệu này trả lời các câu hỏi vận hành thường gặp. Chi ti
 xem `CHANGELOG.md` (kiến trúc), `apps_script/SETUP.md` (setup Sheets), và
 `apps_script/formal/README.md` (kiểm chứng hình thức luồng cấp phiên).
 
+> [!WARNING]
+> **Lỗi hay gặp nhất khi cập nhật `Code.gs`**: bấm nút **Deploy** to ở góc
+> trên rồi chọn **New deployment** → việc này tạo ra **deployment MỚI với URL
+> khác** thay vì cập nhật deployment đang chạy. App vẫn gọi vào URL cũ (code
+> cũ) — dán code mới tưởng xong nhưng thực ra chưa có gì thay đổi. Đã xảy ra
+> **2 lần** trong quá trình làm việc. Luôn làm đúng theo:
+> **Deploy → Manage deployments → bấm ✏️ cạnh deployment đã có → Version: New
+> version → Deploy**. Nếu lỡ tạo deployment mới, báo ngay để cập nhật lại
+> `LAB_API_URL` trong GitHub Secrets và build lại app.
+
 ## App đang nằm ở đâu trên máy tôi?
 
 `/Applications/LabDesk.app` — chỉ có **đúng 1 bản**. Nếu bạn nghi ngờ có
