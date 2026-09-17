@@ -35,7 +35,8 @@ console.log('=== 1. ping (doGet) ===');
 console.log('=== 2. login: happy path allocates the free machine ===');
 {
   const sheets = freshSheets();
-  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  const built = buildSandbox({ sharedSecret: 'S3CR3T', sheets });
+  const sb = loadCode(built.sandbox, CODE_PATH);
   const res = call(sb, 'doPost', {
     postData: { contents: JSON.stringify({ action: 'login', student_id: '20210001', full_name: 'Nguyen Van A', secret: 'S3CR3T' }) },
   });
@@ -61,17 +62,21 @@ console.log('=== 2. login: happy path allocates the free machine ===');
   });
   check('duplicate session for same student denied', res3.allowed === false, JSON.stringify(res3));
 
-  global.__ctx = { sb, sheets, token: res.session_token };
+  global.__ctx = { sb, sheets, token: res.session_token, scriptCacheStore: built.scriptCacheStore };
 }
 
 console.log('=== 3. status: active, then admin kick ===');
 {
-  const { sb, sheets, token } = global.__ctx;
+  const { sb, sheets, token, scriptCacheStore } = global.__ctx;
   const st1 = call(sb, 'doGet', { parameter: { action: 'status', token, secret: 'S3CR3T' } });
   check('status active', st1.status === 'active', JSON.stringify(st1));
 
   const headers = sheets.ActiveSessions.headers;
   sheets.ActiveSessions.rows[0][headers.indexOf('admin_action')] = 'kick';
+  // Simulates the ~4s ACTIVE_SESSIONS_CACHE_TTL_SEC having elapsed since the
+  // previous poll cached a pre-kick snapshot - exactly what happens for a
+  // real admin typing "kick" into the sheet between two of a client's polls.
+  delete scriptCacheStore['active_sessions_snapshot_v1'];
 
   const st2 = call(sb, 'doGet', { parameter: { action: 'status', token, secret: 'S3CR3T' } });
   check('status kicked', st2.status === 'kicked', JSON.stringify(st2));
@@ -313,7 +318,8 @@ console.log('=== 12. Per-session time limit (Config!max_minutes) ===');
 {
   const sheets = freshSheets();
   sheets.Config = new FakeSheet(['key', 'value'], [['max_minutes', '30']]);
-  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  const built = buildSandbox({ sharedSecret: 'S3CR3T', sheets });
+  const sb = loadCode(built.sandbox, CODE_PATH);
 
   const login = call(sb, 'doPost', {
     postData: { contents: JSON.stringify({ action: 'login', student_id: 'tl1', full_name: 'A', secret: 'S3CR3T' }) },
@@ -330,6 +336,10 @@ console.log('=== 12. Per-session time limit (Config!max_minutes) ===');
 
   console.log('  -- 12b. time limit reached: next poll frees the machine --');
   sheets.ActiveSessions.rows[0][expiresAtCol] = new Date(Date.now() - 1000).toISOString();
+  // Same reasoning as test 3: 12a already warmed the cache with a
+  // not-yet-expired snapshot, so this simulates ACTIVE_SESSIONS_CACHE_TTL_SEC
+  // having elapsed since then.
+  delete built.scriptCacheStore['active_sessions_snapshot_v1'];
   const late = call(sb, 'doGet', { parameter: { action: 'status', token: login.session_token, secret: 'S3CR3T' } });
   check('status reports expired once the time limit passes', late.status === 'expired', JSON.stringify(late));
   check('sheet row freed', sheets.ActiveSessions.rows[0][headers.indexOf('status')] === 'free');
@@ -401,6 +411,57 @@ console.log('  -- 13c. no Queue sheet -> queue_position is just null (backward c
   });
   check('view mode still granted without a Queue sheet', res.mode === 'view', JSON.stringify(res));
   check('queue_position is null, not an error', res.queue_position === null, JSON.stringify(res));
+}
+
+console.log('=== 14. status() caching (CacheService) does not change observable behavior ===');
+{
+  const sheets = freshSheets();
+  const { sandbox, scriptCacheStore } = buildSandbox({ sharedSecret: 'S3CR3T', sheets });
+  const sb = loadCode(sandbox, CODE_PATH);
+  const login = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: '1', full_name: 'A', secret: 'S3CR3T' }) },
+  });
+
+  const st1 = call(sb, 'doGet', { parameter: { action: 'status', token: login.session_token, secret: 'S3CR3T' } });
+  check('first poll populates the cache and reports active', st1.status === 'active' && !!scriptCacheStore['active_sessions_snapshot_v1']);
+
+  console.log('  -- 14a. kick is still detected while served from cache --');
+  const headers = sheets.ActiveSessions.headers;
+  sheets.ActiveSessions.rows[0][headers.indexOf('admin_action')] = 'kick';
+  // Cache is still warm (not cleared) - handleStatus must read admin_action
+  // from a snapshot that includes this write, or dedicate a fresh read; a
+  // stale cache from *before* the sheet write would still see it if the
+  // cache genuinely holds a live JS reference by mistake, so this also
+  // guards against that class of bug.
+  scriptCacheStore['active_sessions_snapshot_v1'] = JSON.stringify(sheets.ActiveSessions.getDataRange().getValues());
+  const st2 = call(sb, 'doGet', { parameter: { action: 'status', token: login.session_token, secret: 'S3CR3T' } });
+  check('kick detected through the cached path', st2.status === 'kicked', JSON.stringify(st2));
+  check('sheet freed after cached-path kick', sheets.ActiveSessions.rows[0][headers.indexOf('status')] === 'free');
+
+  console.log('  -- 14a-2. an immediate second poll (same token, cache not manually cleared) does not reprocess the kick --');
+  const st2b = call(sb, 'doGet', { parameter: { action: 'status', token: login.session_token, secret: 'S3CR3T' } });
+  check('second poll right after the kick reports not_found, not a duplicate kicked',
+      st2b.status === 'not_found', JSON.stringify(st2b));
+  check('exactly one kicked entry in the audit log, not two',
+      sheets.AuditLog.rows.filter(r => r[3] === 'kicked').length === 1, JSON.stringify(sheets.AuditLog.rows));
+}
+{
+  console.log('=== 14b. cache miss (token not in the stale snapshot) falls back to a fresh read, never false not_found ===');
+  const sheets = freshSheets();
+  const { sandbox, scriptCacheStore } = buildSandbox({ sharedSecret: 'S3CR3T', sheets });
+  const sb = loadCode(sandbox, CODE_PATH);
+  // Simulate a cache warmed *before* this student logged in: an empty/free
+  // snapshot with no session_token for them at all.
+  scriptCacheStore['active_sessions_snapshot_v1'] = JSON.stringify(sheets.ActiveSessions.getDataRange().getValues());
+
+  const login = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: '1', full_name: 'A', secret: 'S3CR3T' }) },
+  });
+  check('login succeeded', login.allowed === true);
+
+  const st = call(sb, 'doGet', { parameter: { action: 'status', token: login.session_token, secret: 'S3CR3T' } });
+  check('a legitimately active session is never falsely reported not_found due to a stale cache',
+      st.status === 'active', JSON.stringify(st));
 }
 
 console.log(`\n${pass} passed, ${fail} failed`);

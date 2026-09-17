@@ -40,9 +40,9 @@ function writeAuditLog(studentId, machineId, eventType, detail) {
 
 // Find a row in ActiveSessions by a column header value.
 // Returns {row: 1-based, data: {col_header: value, ...}} or null.
-function findSessionRow(headerName, value) {
-  const sheet = getSheet('ActiveSessions');
-  const data = sheet.getDataRange().getValues();
+// Shared by findSessionRow (always a fresh read) and handleStatus's cached
+// read - the search itself doesn't care where `data` came from.
+function searchSessionRow(data, headerName, value) {
   if (data.length < 2) return null;
   const headers = data[0];
   const colIdx = headers.indexOf(headerName);
@@ -56,6 +56,54 @@ function findSessionRow(headerName, value) {
   }
   return null;
 }
+
+function findSessionRow(headerName, value) {
+  const sheet = getSheet('ActiveSessions');
+  return searchSessionRow(sheet.getDataRange().getValues(), headerName, value);
+}
+
+// A busy lab (many students, each polling status() every ~12s) turns into
+// N/12 sheet reads per second, all hitting the same ActiveSessions sheet -
+// SpreadsheetApp reads are the slow part of every status() call. Caching a
+// short-lived snapshot means concurrent polls landing within the same
+// window share one read instead of each doing their own.
+//
+// Deliberately NOT used by handleLogin's allocation scan or by
+// findSessionRow/handleLogout: those paths must always see the live sheet -
+// this file's apps_script/formal/ TLA+ proof assumes exactly that, and nothing
+// here changes the write side, only this one read path.
+const ACTIVE_SESSIONS_CACHE_KEY = 'active_sessions_snapshot_v1';
+const ACTIVE_SESSIONS_CACHE_TTL_SEC = 4; // < 12s poll interval; worst case
+    // this adds ~4s to kick/expiry detection latency, still well inside the
+    // ~15s the client and SETUP.md already document.
+
+function getActiveSessionsDataCached() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(ACTIVE_SESSIONS_CACHE_KEY);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      // Corrupt cache entry: fall through to a fresh read rather than error.
+    }
+  }
+  const sheet = getSheet('ActiveSessions');
+  const data = sheet.getDataRange().getValues();
+  cache.put(ACTIVE_SESSIONS_CACHE_KEY, JSON.stringify(data), ACTIVE_SESSIONS_CACHE_TTL_SEC);
+  return data;
+}
+
+// Called only after kick/expiry processing (freeSessionRow via the cached
+// read path) - without this, a second poll landing inside the same TTL
+// window (e.g. a viewer sharing the just-kicked controller's token) would
+// see the pre-free snapshot and reprocess the same kick/expiry a second
+// time. The common "still active" path deliberately does NOT call this: it
+// never changes status/admin_action/session_token, so leaving the cache as
+// is there is what makes the caching worth doing at all.
+function invalidateActiveSessionsCache() {
+  CacheService.getScriptCache().remove(ACTIVE_SESSIONS_CACHE_KEY);
+}
+
 
 function setSessionCell(row, headers, colName, value) {
   const sheet = getSheet('ActiveSessions');
@@ -466,7 +514,14 @@ function handleStatus(params) {
     return jsonResponse({ status: 'not_found' });
   }
 
-  const found = findSessionRow('session_token', token);
+  let found = searchSessionRow(getActiveSessionsDataCached(), 'session_token', token);
+  if (!found) {
+    // Could be a real not_found, or just a session the cache hasn't picked
+    // up yet (e.g. logged in within the last few seconds). Falling back to
+    // a fresh read before giving up means a legitimately active client is
+    // never wrongly told to disconnect because of cache staleness.
+    found = findSessionRow('session_token', token);
+  }
   if (!found) {
     return jsonResponse({ status: 'not_found' });
   }
@@ -478,6 +533,7 @@ function handleStatus(params) {
   if (adminAction === 'kick') {
     // Process the kick
     freeSessionRow(found.row, found.headers);
+    invalidateActiveSessionsCache();
 
     writeAuditLog(studentId, machineId, 'kicked',
         (found.data['full_name'] || studentId) + ' - Admin kick');
@@ -490,6 +546,7 @@ function handleStatus(params) {
   const expiresAt = parseTime(found.data['expires_at']);
   if (expiresAt && Date.now() >= expiresAt) {
     freeSessionRow(found.row, found.headers);
+    invalidateActiveSessionsCache();
     writeAuditLog(studentId, machineId, 'expired',
         (found.data['full_name'] || studentId) + ' - Time limit reached');
     return jsonResponse({ status: 'expired' });

@@ -50,6 +50,7 @@ class FakeSheet {
 function buildSandbox({ sharedSecret, sheets, active }) {
   const props = { SHARED_SECRET: sharedSecret };
   const alerts = [];
+  const scriptCacheStore = {};
   // `active` = { sheetName, row } - what the fake "admin cursor" is on,
   // mirroring getActiveSheet()/getActiveRange() in the real Sheets UI.
   const activeState = active || { sheetName: null, row: 0 };
@@ -86,6 +87,16 @@ function buildSandbox({ sharedSecret, sheets, active }) {
     LockService: {
       getScriptLock: () => ({ waitLock: () => {}, releaseLock: () => {} }),
     },
+    // Ignores the TTL argument entirely (no wall-clock in this test harness);
+    // tests that care about expiry call scriptCacheStore.clear() themselves
+    // to simulate it, via the `cache` object returned from buildSandbox().
+    CacheService: {
+      getScriptCache: () => ({
+        get: (k) => (k in scriptCacheStore ? scriptCacheStore[k] : null),
+        put: (k, v) => { scriptCacheStore[k] = v; },
+        remove: (k) => { delete scriptCacheStore[k]; },
+      }),
+    },
     ContentService: {
       MimeType: { JSON: 'JSON' },
       createTextOutput: (text) => ({
@@ -101,7 +112,7 @@ function buildSandbox({ sharedSecret, sheets, active }) {
     isNaN: isNaN,
   };
   sandbox.global = sandbox;
-  return { sandbox, alerts, activeState };
+  return { sandbox, alerts, activeState, scriptCacheStore };
 }
 
 function loadCode(sandbox, codePath) {
