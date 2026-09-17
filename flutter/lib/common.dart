@@ -3022,7 +3022,11 @@ int versionCmp(String v1, String v2) {
 }
 
 String getWindowName({WindowType? overrideType}) {
-  final name = bind.mainGetAppNameSync();
+  // APP_NAME defaults to "RustDesk" (libs/hbb_common/src/config.rs) and is
+  // only overridable through a signed custom-client config (a Pro feature we
+  // don't have a signing key for), so it can't be renamed at the source -
+  // every window title has to be caught here instead.
+  final name = LabConfig.isLabMode ? 'LabDesk' : bind.mainGetAppNameSync();
   switch (overrideType ?? kWindowType) {
     case WindowType.Main:
       return name;

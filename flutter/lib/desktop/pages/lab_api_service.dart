@@ -107,6 +107,9 @@ class LoginResult {
   // join); anything else (including null, e.g. an error result) means normal
   // control.
   final String? mode;
+  // The roster's own name (Students sheet), not what the student typed -
+  // Code.gs overrides it whenever the whitelist matches.
+  final String? fullName;
 
   bool get isViewOnly => mode == 'view';
 
@@ -118,6 +121,7 @@ class LoginResult {
     this.machinePass,
     this.reason,
     this.mode,
+    this.fullName,
   });
 
   factory LoginResult.fromJson(Map<String, dynamic> json) {
@@ -133,6 +137,7 @@ class LoginResult {
       machinePass: json['machine_pass'] as String?,
       reason: json['reason'] as String?,
       mode: json['mode'] as String?,
+      fullName: json['full_name'] as String?,
     );
   }
 

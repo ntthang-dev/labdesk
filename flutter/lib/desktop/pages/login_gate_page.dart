@@ -29,6 +29,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
   String? _errorMessage;
   String? _activeSessionToken;
   String? _connectedMachineName;
+  String? _connectedFullName;
   Timer? _pollTimer;
   DateTime? _connectedAt;
   bool _isViewer = false;
@@ -114,6 +115,8 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       }
 
       _connectedMachineName = result.machineName ?? 'Máy phòng Lab';
+      // The roster name, not the (possibly mistyped) one in the text field.
+      _connectedFullName = result.fullName ?? _nameController.text.trim();
       _isViewer = result.isViewOnly;
 
       // `view-only` is a per-peer setting RustDesk itself enforces (blocks
@@ -190,6 +193,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
         setState(() {
           _activeSessionToken = null;
           _connectedMachineName = null;
+          _connectedFullName = null;
           _isViewer = false;
         });
       }
@@ -204,6 +208,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       _pollTimer?.cancel();
       _activeSessionToken = null;
       _connectedMachineName = null;
+      _connectedFullName = null;
       _connectedAt = null;
       _isViewer = false;
 
@@ -222,6 +227,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       _pollTimer?.cancel();
       _activeSessionToken = null;
       _connectedMachineName = null;
+      _connectedFullName = null;
       _connectedAt = null;
       _isViewer = false;
       if (widget.connectHandler == null) {
@@ -253,6 +259,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       setState(() {
         _activeSessionToken = null;
         _connectedMachineName = null;
+        _connectedFullName = null;
         _isViewer = false;
         _isLoading = false;
       });
@@ -366,7 +373,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
         ),
         const SizedBox(height: 4),
         Text(
-          'Sinh viên: ${_nameController.text} (${_studentIdController.text})',
+          'Sinh viên: ${_connectedFullName ?? _nameController.text} (${_studentIdController.text})',
           style: const TextStyle(fontSize: 13, color: Colors.grey),
         ),
         const SizedBox(height: 20),
@@ -432,7 +439,11 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
           // Header Logo (Centered, no settings icon)
           Center(
             child: Image.asset(
-              'res/icon.png',
+              // Not 'res/icon.png': that path isn't declared under pubspec's
+              // `assets:` (only flutter/assets/ is), so it always 404'd here
+              // and silently fell through to errorBuilder below - the logo
+              // never actually rendered.
+              'assets/icon.png',
               width: 64,
               height: 64,
               errorBuilder: (_, __, ___) => Icon(

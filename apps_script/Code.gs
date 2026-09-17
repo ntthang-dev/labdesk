@@ -291,7 +291,8 @@ function handleLogin(body) {
         session_token: occupiedFallback.data['session_token'],
         machine_id: machineId,
         machine_name: occupiedFallback.data['machine_name'] || machineId,
-        machine_pass: occupiedFallback.data['machine_pass'] || ''
+        machine_pass: occupiedFallback.data['machine_pass'] || '',
+        full_name: full_name
       });
     }
     writeAuditLog(student_id, body.machine_id || '', 'login_denied', 'No free machine');
@@ -316,7 +317,10 @@ function handleLogin(body) {
     session_token: token,
     machine_id: machineId,
     machine_name: targetRow.data['machine_name'] || machineId,
-    machine_pass: targetRow.data['machine_pass'] || ''
+    machine_pass: targetRow.data['machine_pass'] || '',
+    // The roster name (already overridden from Students above), so the client
+    // shows the official name rather than whatever was typed at login.
+    full_name: full_name
   });
 }
 
