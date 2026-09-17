@@ -25,6 +25,12 @@
 > `machine_id` có thể là IP Tailscale (`100.83.83.70`) hoặc mã RustDesk ID (9 chữ số). `machine_pass` là mật khẩu cố định đã đặt trên máy lab (`rustdesk.exe --password <pass>`) — client lấy mật khẩu từ đây nên **không** cần bake vào bản build.
 >
 > `last_seen` được script tự ghi mỗi lần client poll. Nếu quên tạo cột, script sẽ tự thêm ở lần `login` đầu tiên. Một phiên không còn heartbeat quá 60 giây sẽ tự được giải phóng và ghi `expired` vào `AuditLog` — nhờ vậy sinh viên tắt cứng app không làm kẹt máy.
+>
+> **Nhiều máy lab: đã hỗ trợ sẵn, không cần sửa code.** Thêm dòng nữa vào
+> sheet này (mỗi dòng 1 máy, mỗi máy 1 `machine_pass` riêng) là xong.
+> `handleLogin` tự quét tìm máy trống đầu tiên; hết máy trống thì sinh viên
+> tiếp theo được vào **chế độ xem** máy đang bận + xếp hàng, y như với 1 máy.
+> (`apps_script/test/run_test.js` test #15 kiểm chứng đúng hành vi này.)
 
 ### Sheet 3: `AuditLog`
 **Just create the header row:**

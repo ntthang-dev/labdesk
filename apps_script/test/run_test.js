@@ -464,5 +464,36 @@ console.log('=== 14. status() caching (CacheService) does not change observable 
       st.status === 'active', JSON.stringify(st));
 }
 
+console.log('=== 15. Multi-machine: adding more ActiveSessions rows just works, no code change needed ===');
+{
+  const sheets = freshSheets();
+  // A second lab machine, same schema, already free.
+  sheets.ActiveSessions.rows.push(['100.83.83.71', 'PC Lab 02', 'free', '', '', '', '', '', 'OtherPass@2026']);
+
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+
+  const r1 = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 's1', full_name: 'A', secret: 'S3CR3T' }) },
+  });
+  check('first student gets machine 1 (first free row)', r1.allowed === true && r1.machine_id === '100.83.83.70', JSON.stringify(r1));
+
+  const r2 = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 's2', full_name: 'B', secret: 'S3CR3T' }) },
+  });
+  check('second student gets machine 2 (still free), not view mode on machine 1',
+      r2.allowed === true && r2.machine_id === '100.83.83.71' && r2.mode !== 'view', JSON.stringify(r2));
+
+  const r3 = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: 's3', full_name: 'C', secret: 'S3CR3T' }) },
+  });
+  check('third student, both machines occupied, joins machine 1 as viewer',
+      r3.allowed === true && r3.mode === 'view' && r3.machine_id === '100.83.83.70', JSON.stringify(r3));
+
+  const headers = sheets.ActiveSessions.headers;
+  check('both machine rows independently occupied by the right student',
+      sheets.ActiveSessions.rows[0][headers.indexOf('student_id')] === 's1' &&
+      sheets.ActiveSessions.rows[1][headers.indexOf('student_id')] === 's2');
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);
