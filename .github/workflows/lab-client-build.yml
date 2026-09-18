@@ -451,15 +451,30 @@ jobs:
             echo "::warning::LAB_API_URL/LAB_SHARED_SECRET not set - Release was created but Config!latest_version was NOT updated. Set it by hand or add the secrets."
             exit 0
           fi
-          # -L: Apps Script Web Apps answer every request with a 302 to a
+          # Apps Script Web Apps answer every request with a 302 to a
           # googleusercontent.com echo of the real response - the POST's
           # effect already happened by the time that 302 comes back, but
-          # following it is the only way to see whether it actually
-          # reported success (e.g. a stale deployment predating this action
-          # answers 200 + {"error":"unknown action"}, not an HTTP error).
-          RESPONSE=$(curl -sL -X POST "$INPUT_API_URL" \
+          # confirming it actually reported success needs the echoed body.
+          #
+          # `curl -L` on a POST is NOT reliable for this: verified live
+          # (2026-09-18, run 35315077327) that it can come back with a
+          # Google Drive "can't open this file" HTML page instead of the
+          # echoed JSON, for reasons never fully pinned down - the same
+          # flakiness _sendWithRedirect() in lab_api_service.dart was
+          # written to avoid. The reliable form is two separate requests:
+          # get the raw 302 without following it, then GET its Location
+          # header as its own plain request.
+          HEADERS=$(mktemp)
+          curl -s -D "$HEADERS" -o /dev/null -X POST "$INPUT_API_URL" \
             -H "Content-Type: application/json" \
-            -d "{\"action\":\"publish_release\",\"version\":\"${VERSION}\",\"download_url\":\"${RELEASE_URL}\",\"secret\":\"${INPUT_SECRET}\"}")
+            -d "{\"action\":\"publish_release\",\"version\":\"${VERSION}\",\"download_url\":\"${RELEASE_URL}\",\"secret\":\"${INPUT_SECRET}\"}"
+          LOCATION=$(grep -i '^location:' "$HEADERS" | sed 's/^[Ll]ocation: *//' | tr -d '\r')
+          rm -f "$HEADERS"
+          if [ -z "$LOCATION" ]; then
+            echo "::warning::publish_release POST returned no redirect - could not confirm the result. The write itself likely still happened; check CrashLog/AuditLog by hand if unsure."
+            exit 0
+          fi
+          RESPONSE=$(curl -s "$LOCATION")
           echo "Backend response: $RESPONSE"
           if ! echo "$RESPONSE" | grep -q '"success":true'; then
             echo "::warning::publish_release did not report success - Config!latest_version may be stale. Deployed Code.gs may predate the publish_release action (see apps_script/src/26_release.gs), or SHARED_SECRET may be wrong."
