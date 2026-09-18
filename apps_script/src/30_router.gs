@@ -9,14 +9,22 @@ function doPost(e) {
       return jsonResponse({ error: 'unauthorized' }, 403);
     }
 
-    // feedback() and cancel_booking() only touch a single row each (append,
-    // or cancel-by-owner) - no read-then-write race like login/book, so
-    // neither needs (or benefits from) the allocation lock below.
+    // feedback()/crash_report()/cancel_booking() only touch a single row
+    // each (append, or cancel-by-owner) - no read-then-write race like
+    // login/book, so none of them need (or benefit from) the allocation
+    // lock below. publish_release() writes at most 2 Config cells by exact
+    // key match (upsertConfigValue), same reasoning.
     if (action === 'feedback') {
       return handleFeedback(body);
     }
+    if (action === 'crash_report') {
+      return handleCrashReport(body);
+    }
     if (action === 'cancel_booking') {
       return handleCancelBooking(body);
+    }
+    if (action === 'publish_release') {
+      return handlePublishRelease(body);
     }
 
     // Allocating a machine (login) or a schedule slot (book) is

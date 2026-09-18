@@ -139,8 +139,13 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       _controllerStudentId = result.controllerStudentId;
       _expiresAt = result.expiresAt;
       // The remote desktop runs in its own window/isolate and reads this file
-      // to render its own countdown - see LabSessionClock.
-      LabSessionClock.write(result.expiresAt);
+      // to render its own countdown and identify crash reports - see
+      // LabSessionClock.
+      LabSessionClock.writeSession(
+        studentId: _studentIdController.text.trim(),
+        fullName: _connectedFullName!,
+        expiresAt: result.expiresAt,
+      );
       _startCountdown();
 
       // `view-only` is a per-peer setting RustDesk itself enforces (blocks
@@ -250,7 +255,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
           _controllerName = null;
           _controllerStudentId = null;
           _expiresAt = null;
-          LabSessionClock.write(null);
+          LabSessionClock.clear();
           _countdownTimer?.cancel();
           _timeRemaining = null;
         });
@@ -273,7 +278,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       _controllerName = null;
       _controllerStudentId = null;
       _expiresAt = null;
-      LabSessionClock.write(null);
+      LabSessionClock.clear();
       _countdownTimer?.cancel();
       _timeRemaining = null;
 
@@ -299,7 +304,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       _controllerName = null;
       _controllerStudentId = null;
       _expiresAt = null;
-      LabSessionClock.write(null);
+      LabSessionClock.clear();
       _countdownTimer?.cancel();
       _timeRemaining = null;
       if (widget.connectHandler == null) {
@@ -337,7 +342,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
         _controllerName = null;
         _controllerStudentId = null;
         _expiresAt = null;
-        LabSessionClock.write(null);
+        LabSessionClock.clear();
         _countdownTimer?.cancel();
         _timeRemaining = null;
         _isLoading = false;

@@ -22,9 +22,10 @@ const SHARED_SECRET = PROPS.getProperty('SHARED_SECRET') || 'change-me';
 // first. Only ever returns this static string + a feature list, never any
 // sheet data, so it deliberately skips the secret check that guards every
 // other action.
-const CODE_VERSION = '2026-09-18-modular-readable-timestamps';
+const CODE_VERSION = '2026-09-18-crashlog-config-cache-auto-release';
 const CODE_FEATURES = ['view_only_queue', 'expires_at_countdown', 'group_restricted_view',
-  'schedule_booking', 'feedback', 'version_gate', 'readable_timestamps', 'setup_all_sheets'];
+  'schedule_booking', 'feedback', 'version_gate', 'readable_timestamps', 'setup_all_sheets',
+  'crash_report', 'config_cache', 'availability_cache', 'publish_release'];
 
 // A client polls `status` every ~12s. If nothing has been heard for this long the
 // student's machine died or the app was force-quit, so the slot is reclaimed.
@@ -213,17 +214,44 @@ function reapStaleSessions() {
 
 // Optional `Config` sheet (key | value, 2 columns, 1 row per key) for
 // settings an admin wants to change without redeploying: min_version,
-// latest_version, download_url so far. Sheet may not exist at all -
-// callers get {} and every feature that reads from it just no-ops.
+// latest_version, download_url, slot_*, max_minutes, etc. Sheet may not
+// exist at all - callers get {} and every feature that reads from it just
+// no-ops.
+//
+// Cached: readConfig() is called at least once per login/book/status/
+// check_availability - i.e. nearly every request - so it is the single
+// hottest sheet read in the whole backend, despite the sheet itself rarely
+// changing. A short TTL bounds how stale a config edit can be (an admin
+// changing max_minutes mid-class waits up to CONFIG_CACHE_TTL_SEC to take
+// effect everywhere) in exchange for turning most requests' Config access
+// into a cache hit instead of a SpreadsheetApp call.
+const CONFIG_CACHE_KEY = 'config_snapshot_v1';
+const CONFIG_CACHE_TTL_SEC = 15;
+
+function invalidateConfigCache() {
+  CacheService.getScriptCache().remove(CONFIG_CACHE_KEY);
+}
+
 function readConfig() {
-  const sheet = getSheet('Config');
-  if (!sheet) return {};
-  const data = sheet.getDataRange().getValues();
-  const config = {};
-  for (let r = 0; r < data.length; r++) {
-    const key = String(data[r][0] || '').trim();
-    if (key) config[key] = String(data[r][1] || '').trim();
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(CONFIG_CACHE_KEY);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      // Corrupt cache entry: fall through to a fresh read.
+    }
   }
+  const sheet = getSheet('Config');
+  const config = {};
+  if (sheet) {
+    const data = sheet.getDataRange().getValues();
+    for (let r = 0; r < data.length; r++) {
+      const key = String(data[r][0] || '').trim();
+      if (key) config[key] = String(data[r][1] || '').trim();
+    }
+  }
+  cache.put(CONFIG_CACHE_KEY, JSON.stringify(config), CONFIG_CACHE_TTL_SEC);
   return config;
 }
 
@@ -342,10 +370,38 @@ function reservedForSomeoneElse(machineId, studentId, config) {
   return null;
 }
 
+// The booking dialog's slowest call by far (measured ~3-4s live): it reads
+// Config, all of ActiveSessions and all of Schedule, then builds a
+// slots x machines grid. All of that is identical for every student looking
+// at the same date within a few seconds of each other, so it is cached per
+// date with a short TTL - long enough to matter under concurrent load
+// (several students opening the dialog around the same time), short enough
+// that a fresh booking shows up promptly for anyone whose cache already
+// expired. handleBook/handleCancelBooking invalidate the specific date they
+// touched immediately, so "did my booking take" never has to wait out the
+// TTL for the student who just made it.
+const AVAILABILITY_CACHE_PREFIX = 'avail_v1_';
+const AVAILABILITY_CACHE_TTL_SEC = 20;
+
+function invalidateAvailabilityCache(date) {
+  CacheService.getScriptCache().remove(AVAILABILITY_CACHE_PREFIX + date);
+}
+
 function handleCheckAvailability(params) {
+  const date = params.date || dateStr(new Date());
+  const cacheKey = AVAILABILITY_CACHE_PREFIX + date;
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try {
+      return jsonResponse(JSON.parse(cached));
+    } catch (e) {
+      // Corrupt cache entry: fall through to a fresh computation.
+    }
+  }
+
   const config = readConfig();
   const sc = slotConfig(config);
-  const date = params.date || dateStr(new Date());
   const slots = getSlotsForDay(config);
   const bookings = readActiveBookings().filter(b => b.date === date);
 
@@ -368,7 +424,9 @@ function handleCheckAvailability(params) {
       });
     }
   }
-  return jsonResponse({ date: date, days_ahead: sc.daysAhead, slots: grid });
+  const result = { date: date, days_ahead: sc.daysAhead, slots: grid };
+  cache.put(cacheKey, JSON.stringify(result), AVAILABILITY_CACHE_TTL_SEC);
+  return jsonResponse(result);
 }
 
 function handleMyBookings(params) {
@@ -423,6 +481,7 @@ function handleBook(body) {
   const sheet = ensureScheduleSheet();
   sheet.appendRow([date, timeSlot, machineId, studentId, fullName, 'booked', now()]);
   writeAuditLog(studentId, machineId, 'booked', fullName + ' - ' + date + ' ' + timeSlot);
+  invalidateAvailabilityCache(date);
   return jsonResponse({ success: true });
 }
 
@@ -449,6 +508,7 @@ function handleCancelBooking(body) {
         String(data[r][cols.status]).trim().toLowerCase() === 'booked') {
       sheet.getRange(r + 1, cols.status + 1).setValue('cancelled');
       writeAuditLog(studentId, machineId, 'booking_cancelled', date + ' ' + timeSlot);
+      invalidateAvailabilityCache(date);
       return jsonResponse({ success: true });
     }
   }
@@ -519,6 +579,94 @@ function dequeueStudent(machineId, studentId) {
   }
 }
 
+// ----- crash / error reporting -----
+//
+// Separate from `Feedback` (student opinions, read by a human) on purpose:
+// a crash report is machine-generated, needs different columns (app
+// version, platform, stack trace), and an admin triaging bugs wants to
+// filter it out from "sinh viên góp ý máy chậm" without regex-ing a shared
+// sheet. Self-creating like Feedback/Schedule - a crash before anyone has
+// ever crashed shouldn't be blocked on an admin remembering to add a tab.
+function ensureCrashLogSheet() {
+  let sheet = getSheet('CrashLog');
+  if (sheet) return sheet;
+  sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet('CrashLog');
+  sheet.appendRow(['timestamp', 'app_version', 'platform', 'student_id', 'full_name', 'error', 'stack_trace']);
+  return sheet;
+}
+
+// Caps mirror handleFeedback's - this sheet has no whitelist gate beyond
+// SHARED_SECRET (a crash can happen before/without a successful login), so
+// an unbounded string is the same cheap defense-in-depth concern.
+function capLength(s, max) {
+  s = String(s || '');
+  return s.length > max ? s.slice(0, max) : s;
+}
+
+// Fire-and-forget from the client's perspective (see lab_crash_reporter.dart)
+// - it must never throw in a way that surfaces to a student mid-crash, so
+// this handler is intentionally forgiving: missing fields just write blanks
+// rather than rejecting the report.
+function handleCrashReport(body) {
+  const sheet = ensureCrashLogSheet();
+  sheet.appendRow([
+    now(),
+    capLength(body.app_version, 40),
+    capLength(body.platform, 40),
+    capLength(body.student_id, 40),
+    capLength(body.full_name, 200),
+    capLength(body.error, 500),
+    capLength(body.stack_trace, 4000),
+  ]);
+  return jsonResponse({ success: true });
+}
+
+// ----- automatic version publishing (CI -> Config!latest_version) -----
+//
+// Before this, "update phần mềm từ xa" required an admin to manually edit
+// two cells in `Config` after every build - easy to forget, and the whole
+// reason `download_url` pointed at expiring `gh run download` links more
+// than once (see docs/RELEASES_AND_CI.md). The build workflow now computes
+// a semver version, cuts a GitHub Release, and calls this action itself.
+//
+// Deliberately does NOT touch `min_version`: that is a forced-upgrade
+// trigger (blocks login below it), and auto-setting it from every build
+// would let a single bad release lock every student out with no admin in
+// the loop. Only `latest_version`/`download_url` (a dismissible banner) are
+// safe to automate.
+function ensureConfigSheet() {
+  let sheet = getSheet('Config');
+  if (sheet) return sheet;
+  sheet = SpreadsheetApp.getActiveSpreadsheet().insertSheet('Config');
+  sheet.appendRow(['key', 'value']);
+  return sheet;
+}
+
+function upsertConfigValue(key, value) {
+  const sheet = ensureConfigSheet();
+  const data = sheet.getDataRange().getValues();
+  for (let r = 1; r < data.length; r++) {
+    if (String(data[r][0] || '').trim() === key) {
+      sheet.getRange(r + 1, 2).setValue(value);
+      return;
+    }
+  }
+  sheet.appendRow([key, value]);
+}
+
+function handlePublishRelease(body) {
+  const version = String(body.version || '').trim();
+  const downloadUrl = String(body.download_url || '').trim();
+  if (!version) {
+    return jsonResponse({ success: false, reason: 'Thiếu version.' });
+  }
+  upsertConfigValue('latest_version', version);
+  if (downloadUrl) upsertConfigValue('download_url', downloadUrl);
+  invalidateConfigCache();
+  writeAuditLog('CI', '', 'release_published', version + (downloadUrl ? ' - ' + downloadUrl : ''));
+  return jsonResponse({ success: true, latest_version: version });
+}
+
 // ----- API handlers -----
 
 function doPost(e) {
@@ -530,14 +678,22 @@ function doPost(e) {
       return jsonResponse({ error: 'unauthorized' }, 403);
     }
 
-    // feedback() and cancel_booking() only touch a single row each (append,
-    // or cancel-by-owner) - no read-then-write race like login/book, so
-    // neither needs (or benefits from) the allocation lock below.
+    // feedback()/crash_report()/cancel_booking() only touch a single row
+    // each (append, or cancel-by-owner) - no read-then-write race like
+    // login/book, so none of them need (or benefit from) the allocation
+    // lock below. publish_release() writes at most 2 Config cells by exact
+    // key match (upsertConfigValue), same reasoning.
     if (action === 'feedback') {
       return handleFeedback(body);
     }
+    if (action === 'crash_report') {
+      return handleCrashReport(body);
+    }
     if (action === 'cancel_booking') {
       return handleCancelBooking(body);
+    }
+    if (action === 'publish_release') {
+      return handlePublishRelease(body);
     }
 
     // Allocating a machine (login) or a schedule slot (book) is
@@ -982,6 +1138,7 @@ const SHEET_SCHEMA = {
   Queue: ['student_id', 'full_name', 'machine_id', 'requested_at'],
   Schedule: ['date', 'time_slot', 'machine_id', 'student_id', 'full_name', 'status', 'created_at'],
   Feedback: ['timestamp', 'student_id', 'full_name', 'message'],
+  CrashLog: ['timestamp', 'app_version', 'platform', 'student_id', 'full_name', 'error', 'stack_trace'],
 };
 
 // Creates any missing sheet and appends any missing column, without ever

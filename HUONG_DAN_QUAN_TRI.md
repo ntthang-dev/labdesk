@@ -141,31 +141,57 @@ gh secret set LAB_SUPPORT_CONTACT -R ntthang-dev/labdesk --body "SĐT/email qu�
 rồi build lại (`gh workflow run lab-client-build.yml`). Từ đó mọi lỗi hiện
 ra cho sinh viên đều kèm dòng "Cần hỗ trợ? Liên hệ: ...".
 
-## Cập nhật LabDesk cho sinh viên trong tương lai — chi phí & cách làm
+## Cập nhật LabDesk cho sinh viên — đã tự động, chi phí 0đ
 
-**Hiện tại (MVP): không có cơ chế tự động cập nhật.** Mỗi lần bạn build
-xong (`gh workflow run lab-client-build.yml`), sinh viên phải **tự tải lại**
-file `.exe`/`.dmg` mới và cài đè — giống hệt cách bạn đang làm bây giờ.
+**Quy trình đầy đủ giờ chỉ còn 1 lệnh**: `gh workflow run lab-client-build.yml
+-r master -f publish_release=true`. CI tự làm hết: tính số phiên bản (chuẩn
+semver, xem `docs/RELEASES_AND_CI.md`), build Windows + macOS, tạo GitHub
+Release với link tải cố định, và **tự ghi `Config!latest_version` +
+`download_url` vào Sheets** — không cần bạn mở Sheets sửa tay nữa.
 
-**Chi phí hạ tầng hiện tại: 0đ.**
-- GitHub Actions (build): miễn phí cho repo public, có hạn mức phút chạy
-  miễn phí/tháng cho repo private.
-- Google Apps Script + Sheets: miễn phí, có hạn mức số lượt gọi/ngày (dư
-  dùng cho vài chục sinh viên/ngày).
-- Phân phối file cài: **GitHub Releases** là chỗ lưu file `.exe`/`.dmg` miễn
-  phí, không giới hạn dung lượng thực tế cho repo private nội bộ — thay vì
-  gửi link `gh run download` (hết hạn sau ~90 ngày), tạo 1 bản Release cố
-  định (`gh release create v1.0 Output/LabDesk-windows-x64.exe LabDesk-macOS.dmg`)
-  để có 1 link tải ổn định, không cần build lại app khi cần re-share link.
+Sinh viên mở app lên, lần đăng nhập kế tiếp tự thấy banner "Có bản mới, tải
+tại: ...". Muốn **ép buộc** cập nhật (khoá đăng nhập với bản cũ) — việc duy
+nhất còn lại phải làm tay: đặt `Config!min_version` (xem `apps_script/SETUP.md`
+mục Sheet 4), vì đây là quyết định "khoá hết ai chưa cập nhật", không nên tự
+động hoá.
 
-**Nếu sau này cần tự động cập nhật** (sinh viên mở app luôn có bản mới nhất,
-không cần bạn nhắc tải lại): đây là việc **Phase 2**, không làm trong MVP
-này theo đúng phạm vi đã thống nhất. Hướng khả thi, không tốn thêm tiền:
-- App tự gọi 1 API (chính Apps Script hiện có, thêm action `latest_version`)
-  hỏi "bản mới nhất là bao nhiêu", so với bản đang chạy, nếu cũ hơn thì hiện
-  banner "Có bản mới, tải tại: <link GitHub Release>" — sinh viên tự tải,
-  không cần bạn làm gì thêm. Không cần auto-install (phức tạp, rủi ro cao
-  hơn giá trị mang lại cho quy mô phòng lab).
+**Chi phí hạ tầng: vẫn 0đ** — GitHub Actions + Releases (miễn phí cho phần
+này), Google Apps Script + Sheets (miễn phí, dư hạn mức cho vài chục sinh
+viên/ngày).
+
+Không có auto-install (tự tải + tự cài đè mà sinh viên không biết) — rủi ro
+cao hơn giá trị mang lại ở quy mô phòng lab, sinh viên vẫn cần tự bấm tải và
+cài lại khi thấy banner.
+
+## App tự báo lỗi khi crash — không cần sinh viên report
+
+App giờ tự bắt mọi lỗi Flutter chưa xử lý (crash khi vẽ giao diện, lỗi mạng
+không lường trước, v.v.) và tự gửi báo cáo về sheet **`CrashLog`** (tự tạo,
+xem `apps_script/SETUP.md` Sheet 8) — sinh viên **không thấy gì cả, không
+cần làm gì, không cần biết đã có lỗi xảy ra**.
+
+Mỗi dòng trong `CrashLog` có: thời điểm, phiên bản app, nền tảng (macOS/
+Windows), MSSV + tên (nếu sinh viên đó đang đăng nhập lúc crash), thông điệp
+lỗi, và stack trace đầy đủ (giúp debug). Khác với sheet `Feedback` (góp ý
+bằng lời của sinh viên) — đây là log kỹ thuật.
+
+**Cách dùng khi nghi ngờ có lỗi**: mở `CrashLog`, lọc theo cột `error` — nếu
+nhiều dòng giống nhau xuất hiện dồn dập, đó là lỗi thật đang lặp lại, báo lại
+kèm nội dung cột `stack_trace` để debug. Có giới hạn tối đa 20 báo cáo/phiên
+làm việc của 1 app (tránh 1 lỗi lặp vô hạn làm đầy sheet), và không có cơ chế
+tự dọn dòng cũ — admin tự xoá bớt định kỳ nếu sheet quá lớn.
+
+## Hiệu năng — đã tối ưu, không cần làm gì thêm
+
+Hai điểm chậm nhất đo được (dialog đặt lịch mất 3-4 giây) đã được cache:
+- `Config` (đọc ở hầu hết mọi request) — cache 15 giây.
+- Lưới khung giờ đặt lịch (`check_availability`) — cache 20 giây theo từng
+  ngày, **tự xoá cache ngay lập tức** khi có ai đặt/huỷ lịch trong ngày đó,
+  nên "đặt xong có thấy liền không" luôn đúng dù đang cache.
+
+Đánh đổi duy nhất: sửa `Config` trực tiếp trong Sheets (không qua
+`publish_release`) có thể mất tới 15 giây mới có hiệu lực ở mọi nơi — chấp
+nhận được, vì admin hiếm khi cần thay đổi tức thì trong lúc lớp đang học.
 
 ## Hướng tối ưu hoá toàn diện — Phase 2 (không làm ngay, chỉ để tham khảo)
 

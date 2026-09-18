@@ -22,9 +22,10 @@ const SHARED_SECRET = PROPS.getProperty('SHARED_SECRET') || 'change-me';
 // first. Only ever returns this static string + a feature list, never any
 // sheet data, so it deliberately skips the secret check that guards every
 // other action.
-const CODE_VERSION = '2026-09-18-modular-readable-timestamps';
+const CODE_VERSION = '2026-09-18-crashlog-config-cache-auto-release';
 const CODE_FEATURES = ['view_only_queue', 'expires_at_countdown', 'group_restricted_view',
-  'schedule_booking', 'feedback', 'version_gate', 'readable_timestamps', 'setup_all_sheets'];
+  'schedule_booking', 'feedback', 'version_gate', 'readable_timestamps', 'setup_all_sheets',
+  'crash_report', 'config_cache', 'availability_cache', 'publish_release'];
 
 // A client polls `status` every ~12s. If nothing has been heard for this long the
 // student's machine died or the app was force-quit, so the slot is reclaimed.
@@ -213,16 +214,43 @@ function reapStaleSessions() {
 
 // Optional `Config` sheet (key | value, 2 columns, 1 row per key) for
 // settings an admin wants to change without redeploying: min_version,
-// latest_version, download_url so far. Sheet may not exist at all -
-// callers get {} and every feature that reads from it just no-ops.
+// latest_version, download_url, slot_*, max_minutes, etc. Sheet may not
+// exist at all - callers get {} and every feature that reads from it just
+// no-ops.
+//
+// Cached: readConfig() is called at least once per login/book/status/
+// check_availability - i.e. nearly every request - so it is the single
+// hottest sheet read in the whole backend, despite the sheet itself rarely
+// changing. A short TTL bounds how stale a config edit can be (an admin
+// changing max_minutes mid-class waits up to CONFIG_CACHE_TTL_SEC to take
+// effect everywhere) in exchange for turning most requests' Config access
+// into a cache hit instead of a SpreadsheetApp call.
+const CONFIG_CACHE_KEY = 'config_snapshot_v1';
+const CONFIG_CACHE_TTL_SEC = 15;
+
+function invalidateConfigCache() {
+  CacheService.getScriptCache().remove(CONFIG_CACHE_KEY);
+}
+
 function readConfig() {
-  const sheet = getSheet('Config');
-  if (!sheet) return {};
-  const data = sheet.getDataRange().getValues();
-  const config = {};
-  for (let r = 0; r < data.length; r++) {
-    const key = String(data[r][0] || '').trim();
-    if (key) config[key] = String(data[r][1] || '').trim();
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(CONFIG_CACHE_KEY);
+  if (cached) {
+    try {
+      return JSON.parse(cached);
+    } catch (e) {
+      // Corrupt cache entry: fall through to a fresh read.
+    }
   }
+  const sheet = getSheet('Config');
+  const config = {};
+  if (sheet) {
+    const data = sheet.getDataRange().getValues();
+    for (let r = 0; r < data.length; r++) {
+      const key = String(data[r][0] || '').trim();
+      if (key) config[key] = String(data[r][1] || '').trim();
+    }
+  }
+  cache.put(CONFIG_CACHE_KEY, JSON.stringify(config), CONFIG_CACHE_TTL_SEC);
   return config;
 }

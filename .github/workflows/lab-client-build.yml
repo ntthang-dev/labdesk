@@ -24,9 +24,14 @@ on:
         required: false
         type: string
       app_version:
-        description: "LabDesk app version string shown in-app and compared against Config!min_version (default 1.0.0)"
+        description: "Override the auto-computed version (leave blank to use flutter/VERSION + commit count)"
         required: false
         type: string
+      publish_release:
+        description: "Cut a GitHub Release from this build and notify the backend (Config!latest_version)"
+        required: false
+        type: boolean
+        default: false
   push:
     tags:
       - "v*"
@@ -40,6 +45,40 @@ env:
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
 
 jobs:
+  # Semver "MAJOR.MINOR.PATCH" where MAJOR.MINOR comes from flutter/VERSION
+  # (bumped by hand for an intentional feature/breaking release) and PATCH is
+  # the number of commits since that file last changed - so every build gets
+  # a distinct, monotonically increasing, standard-shaped version with zero
+  # manual bookkeeping per build. A `v*` tag push (a deliberate release)
+  # instead takes the version straight from the tag, which is what the tag
+  # is for. `inputs.app_version` always wins if someone needs to override.
+  compute-version:
+    name: Compute app version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - name: Checkout repository (full history for commit count)
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute version
+        id: ver
+        shell: bash
+        run: |
+          set -e
+          if [ -n "${{ inputs.app_version }}" ]; then
+            echo "version=${{ inputs.app_version }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.ref_type }}" = "tag" ]; then
+            echo "version=${GITHUB_REF_NAME#v}" >> "$GITHUB_OUTPUT"
+          else
+            BASE=$(tr -d '[:space:]' < flutter/VERSION)
+            LAST_BUMP_SHA=$(git log -1 --format=%H -- flutter/VERSION)
+            PATCH=$(git rev-list --count "${LAST_BUMP_SHA}..HEAD")
+            echo "version=${BASE}.${PATCH}" >> "$GITHUB_OUTPUT"
+          fi
+
   # src/bridge_generated.rs and flutter/lib/generated_bridge.dart are gitignored
   # upstream; without this job cargo fails with E0583 "file not found for module
   # `bridge_generated`".
@@ -48,7 +87,7 @@ jobs:
 
   build-windows-x64:
     name: Build Windows x64 Lab Client
-    needs: generate-bridge
+    needs: [generate-bridge, compute-version]
     runs-on: windows-2022
     steps:
       - name: Checkout repository
@@ -142,7 +181,7 @@ jobs:
           INPUT_MACHINE_ID: ${{ inputs.machine_id || secrets.LAB_MACHINE_ID }}
           INPUT_MACHINE_PASSWORD: ${{ inputs.machine_password || secrets.LAB_MACHINE_PASSWORD }}
           INPUT_SUPPORT_CONTACT: ${{ inputs.support_contact || secrets.LAB_SUPPORT_CONTACT }}
-          INPUT_APP_VERSION: ${{ inputs.app_version || vars.LAB_APP_VERSION }}
+          INPUT_APP_VERSION: ${{ needs.compute-version.outputs.version }}
         run: |
           set -e
           if [ -z "$INPUT_API_URL" ] || [ -z "$INPUT_SECRET" ]; then
@@ -197,7 +236,7 @@ jobs:
 
   build-macos:
     name: Build macOS Lab Client (arm64 DMG)
-    needs: generate-bridge
+    needs: [generate-bridge, compute-version]
     runs-on: macos-14
     steps:
       - name: Export GitHub Actions cache environment variables
@@ -294,7 +333,7 @@ jobs:
           INPUT_MACHINE_ID: ${{ inputs.machine_id || secrets.LAB_MACHINE_ID }}
           INPUT_MACHINE_PASSWORD: ${{ inputs.machine_password || secrets.LAB_MACHINE_PASSWORD }}
           INPUT_SUPPORT_CONTACT: ${{ inputs.support_contact || secrets.LAB_SUPPORT_CONTACT }}
-          INPUT_APP_VERSION: ${{ inputs.app_version || vars.LAB_APP_VERSION }}
+          INPUT_APP_VERSION: ${{ needs.compute-version.outputs.version }}
         run: |
           set -e
           if [ -z "$INPUT_API_URL" ] || [ -z "$INPUT_SECRET" ]; then
@@ -350,3 +389,78 @@ jobs:
         with:
           name: LabDesk-macOS-arm64-dmg
           path: LabDesk-macOS.dmg
+
+  # Opt-in (a `v*` tag push, or workflow_dispatch with publish_release=true) -
+  # an ad-hoc test build during development must never silently cut a Release
+  # or push a version bump to every student's update banner. Cuts a stable,
+  # non-expiring download link (docs/RELEASES_AND_CI.md's whole reason for
+  # existing) and tells the backend about it in the same step, so "build ->
+  # students see the update banner" needs no admin action in Sheets at all.
+  publish-release:
+    name: Publish GitHub Release + notify backend
+    needs: [compute-version, build-windows-x64, build-macos]
+    if: github.ref_type == 'tag' || inputs.publish_release == true
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@b4ffde65f46336ab88eb53be808477a3936bae11 # v4
+
+      - name: Download Windows executable
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: LabDesk-windows-x64
+          path: ./release-assets
+
+      - name: Download macOS DMG
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: LabDesk-macOS-arm64-dmg
+          path: ./release-assets
+
+      - name: Create GitHub Release
+        id: release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.compute-version.outputs.version }}
+        run: |
+          set -e
+          TAG="v${VERSION}"
+          # Re-running publish_release=true on the same commit (e.g. a retry)
+          # must update the existing release's assets, not fail on "tag
+          # already exists".
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            gh release upload "$TAG" ./release-assets/* --clobber
+          else
+            gh release create "$TAG" ./release-assets/* \
+              --title "LabDesk v${VERSION}" \
+              --notes "Tự động build từ commit ${GITHUB_SHA::9}. Xem CHANGELOG.md."
+          fi
+          echo "url=https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Notify backend (Config!latest_version)
+        env:
+          INPUT_API_URL: ${{ inputs.api_url || secrets.LAB_API_URL }}
+          INPUT_SECRET: ${{ inputs.shared_secret || secrets.LAB_SHARED_SECRET }}
+          VERSION: ${{ needs.compute-version.outputs.version }}
+          RELEASE_URL: ${{ steps.release.outputs.url }}
+        run: |
+          set -e
+          if [ -z "$INPUT_API_URL" ] || [ -z "$INPUT_SECRET" ]; then
+            echo "::warning::LAB_API_URL/LAB_SHARED_SECRET not set - Release was created but Config!latest_version was NOT updated. Set it by hand or add the secrets."
+            exit 0
+          fi
+          # -L: Apps Script Web Apps answer every request with a 302 to a
+          # googleusercontent.com echo of the real response - the POST's
+          # effect already happened by the time that 302 comes back, but
+          # following it is the only way to see whether it actually
+          # reported success (e.g. a stale deployment predating this action
+          # answers 200 + {"error":"unknown action"}, not an HTTP error).
+          RESPONSE=$(curl -sL -X POST "$INPUT_API_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"action\":\"publish_release\",\"version\":\"${VERSION}\",\"download_url\":\"${RELEASE_URL}\",\"secret\":\"${INPUT_SECRET}\"}")
+          echo "Backend response: $RESPONSE"
+          if ! echo "$RESPONSE" | grep -q '"success":true'; then
+            echo "::warning::publish_release did not report success - Config!latest_version may be stale. Deployed Code.gs may predate the publish_release action (see apps_script/src/26_release.gs), or SHARED_SECRET may be wrong."
+          fi

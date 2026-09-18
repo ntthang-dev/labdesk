@@ -69,6 +69,12 @@
 > - So khớp version: 2 số càng nhiều đoạn `.` càng chi tiết (`1.2.0` < `1.10.0`
 >   đúng theo số, không so như chuỗi ký tự).
 >
+> **`latest_version`/`download_url` giờ có thể tự cập nhật, không cần sửa tay**:
+> chạy CI với tuỳ chọn `publish_release=true` (hoặc push tag `vX.Y.Z`), workflow
+> sẽ tự tính version, tạo GitHub Release, và gọi thẳng action `publish_release`
+> để ghi 2 giá trị này — xem `docs/RELEASES_AND_CI.md`. `min_version` vẫn luôn
+> phải admin tự đặt tay (quyết định "bắt buộc" không nên tự động).
+>
 > Thêm key `max_minutes` (số phút) vào cùng sheet `Config` để giới hạn thời
 > gian mỗi phiên — hết giờ, client tự bị đăng xuất ở lần poll kế tiếp (≤12s),
 > y hệt cơ chế mất kết nối 60s đã có. Không thêm key này = không giới hạn
@@ -124,6 +130,19 @@
 > qua nút "Gửi góp ý" trong app. Header tự sinh:
 > `timestamp, student_id, full_name, message`. Mở sheet này để đọc góp ý;
 > không cần làm gì thêm, không có xử lý tự động nào khác trên dữ liệu này.
+
+### Sheet 8: `CrashLog` (tự tạo — báo lỗi/crash tự động từ app)
+
+> **Không cần tạo tay** — script tự tạo khi app gặp lỗi lần đầu và tự gửi
+> báo cáo (sinh viên không cần làm gì, không cần biết đã có lỗi xảy ra).
+> Header tự sinh: `timestamp, app_version, platform, student_id, full_name,
+> error, stack_trace`. Khác với `Feedback` (góp ý bằng lời của sinh viên):
+> sheet này là log kỹ thuật, dùng để tìm lỗi phần mềm.
+>
+> Mở sheet này khi nghi ngờ có lỗi hàng loạt (nhiều dòng cùng cột `error`
+> trong thời gian ngắn = lỗi thật, cần báo cho người phát triển kèm cột
+> `stack_trace`). Sheet có thể lớn dần theo thời gian — admin có thể tự xoá
+> bớt dòng cũ định kỳ, không có cơ chế tự dọn.
 
 ## 3. Add the Apps Script
 

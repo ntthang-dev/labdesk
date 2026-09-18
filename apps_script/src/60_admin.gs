@@ -34,6 +34,7 @@ const SHEET_SCHEMA = {
   Queue: ['student_id', 'full_name', 'machine_id', 'requested_at'],
   Schedule: ['date', 'time_slot', 'machine_id', 'student_id', 'full_name', 'status', 'created_at'],
   Feedback: ['timestamp', 'student_id', 'full_name', 'message'],
+  CrashLog: ['timestamp', 'app_version', 'platform', 'student_id', 'full_name', 'error', 'stack_trace'],
 };
 
 // Creates any missing sheet and appends any missing column, without ever

@@ -821,5 +821,129 @@ console.log('=== 23. action=version needs no secret (deployment self-check) ==='
   check('version works even with a wrong secret', typeof wrongSecret.code_version === 'string', JSON.stringify(wrongSecret));
 }
 
+console.log('=== 27. crash_report: self-creating CrashLog sheet, no whitelist gate ===');
+{
+  const sheets = freshSheets();
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  const res = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({
+      action: 'crash_report', app_version: '1.2.3', platform: 'macos',
+      student_id: '20210001', full_name: 'A', error: 'RangeError: boom',
+      stack_trace: 'at foo()\nat bar()', secret: 'S3CR3T',
+    }) },
+  });
+  check('crash_report accepted', res.success === true, JSON.stringify(res));
+  check('CrashLog sheet auto-created', !!sheets.CrashLog);
+  // rows[0] is the header row appendRow() wrote in ensureCrashLogSheet();
+  // the first actual report is rows[1].
+  const row = sheets.CrashLog.rows[1];
+  check('row has app_version/platform/error recorded',
+      row[1] === '1.2.3' && row[2] === 'macos' && row[5] === 'RangeError: boom', JSON.stringify(row));
+
+  const overlong = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({
+      action: 'crash_report', error: 'x'.repeat(1000), stack_trace: 'y'.repeat(5000), secret: 'S3CR3T',
+    }) },
+  });
+  check('crash_report accepts missing student fields without erroring', overlong.success === true, JSON.stringify(overlong));
+  check('error field capped at 500 chars', sheets.CrashLog.rows[2][5].length === 500);
+  check('stack_trace field capped at 4000 chars', sheets.CrashLog.rows[2][6].length === 4000);
+}
+
+console.log('=== 28. publish_release: CI sets latest_version/download_url, never min_version ===');
+{
+  const sheets = freshSheets();
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  const res = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({
+      action: 'publish_release', version: '1.4.0',
+      download_url: 'https://github.com/ntthang-dev/labdesk/releases/tag/v1.4.0',
+      secret: 'S3CR3T',
+    }) },
+  });
+  check('publish_release succeeds', res.success === true && res.latest_version === '1.4.0', JSON.stringify(res));
+  check('Config sheet auto-created', !!sheets.Config);
+  const config = sb.readConfig();
+  check('latest_version set', config.latest_version === '1.4.0', JSON.stringify(config));
+  check('download_url set', config.download_url === 'https://github.com/ntthang-dev/labdesk/releases/tag/v1.4.0');
+  check('min_version untouched (not in the payload)', config.min_version === undefined, JSON.stringify(config));
+
+  // Republishing must update the same row, not append a duplicate key.
+  call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'publish_release', version: '1.4.1', secret: 'S3CR3T' }) },
+  });
+  const dataRows = sheets.Config.rows.filter(r => r[0] === 'latest_version');
+  check('second publish upserts in place (no duplicate rows)', dataRows.length === 1, JSON.stringify(sheets.Config.rows));
+  check('second publish value applied', sb.readConfig().latest_version === '1.4.1');
+
+  const missingVersion = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'publish_release', secret: 'S3CR3T' }) },
+  });
+  check('publish_release rejects a missing version', missingVersion.success === false, JSON.stringify(missingVersion));
+}
+
+console.log('=== 29. Config is cached; publish_release invalidates it immediately ===');
+{
+  const sheets = freshSheets();
+  sheets.Config = new FakeSheet(['key', 'value'], [['max_minutes', '60']]);
+  const built = buildSandbox({ sharedSecret: 'S3CR3T', sheets });
+  const sb = loadCode(built.sandbox, CODE_PATH);
+
+  const first = sb.readConfig();
+  check('first read sees the sheet value', first.max_minutes === '60', JSON.stringify(first));
+  check('read populates the cache', !!built.scriptCacheStore['config_snapshot_v1']);
+
+  // Simulate an admin hand-editing the sheet without going through
+  // publish_release/upsertConfigValue: the cache must NOT see it yet.
+  sheets.Config.rows[0][1] = '120';
+  const stale = sb.readConfig();
+  check('cached read does not see a direct sheet edit (expected staleness)', stale.max_minutes === '60', JSON.stringify(stale));
+
+  sb.invalidateConfigCache();
+  const fresh = sb.readConfig();
+  check('after manual invalidation, fresh value is seen', fresh.max_minutes === '120', JSON.stringify(fresh));
+
+  // publish_release's own writes must be visible immediately, not after TTL.
+  call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'publish_release', version: '2.0.0', secret: 'S3CR3T' }) },
+  });
+  check('publish_release result visible on the very next read', sb.readConfig().latest_version === '2.0.0');
+}
+
+console.log('=== 30. check_availability is cached per date; booking invalidates it ===');
+{
+  const sheets = freshSheets();
+  const probeSb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets: {} }).sandbox, CODE_PATH);
+  const today = probeSb.dateStr(new Date());
+  const built = buildSandbox({ sharedSecret: 'S3CR3T', sheets });
+  const sb = loadCode(built.sandbox, CODE_PATH);
+
+  const first = call(sb, 'doGet', { parameter: { action: 'check_availability', date: today, secret: 'S3CR3T' } });
+  check('first call populates the availability cache', !!built.scriptCacheStore['avail_v1_' + today]);
+
+  // A booking made through a completely fresh sheet mutation (bypassing the
+  // handler) must not appear until the cache is invalidated - proves the
+  // grid really is served from cache, not recomputed every time.
+  const cachedAgain = call(sb, 'doGet', { parameter: { action: 'check_availability', date: today, secret: 'S3CR3T' } });
+  check('second call within TTL returns the identical cached grid',
+      JSON.stringify(cachedAgain) === JSON.stringify(first));
+
+  const book = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'book', student_id: 's1', full_name: 'A', date: today, time_slot: '09:00-11:00', machine_id: '100.83.83.70', secret: 'S3CR3T' }) },
+  });
+  check('booking succeeds', book.success === true, JSON.stringify(book));
+  check('booking invalidates that date\'s cache entry', !built.scriptCacheStore['avail_v1_' + today]);
+
+  const afterBook = call(sb, 'doGet', { parameter: { action: 'check_availability', date: today, secret: 'S3CR3T' } });
+  const slot9 = afterBook.slots.find(s => s.time_slot === '09:00-11:00' && s.machine_id === '100.83.83.70');
+  check('booking is reflected immediately, not after the TTL', slot9 && slot9.available === false, JSON.stringify(slot9));
+
+  const cancel = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'cancel_booking', student_id: 's1', date: today, time_slot: '09:00-11:00', machine_id: '100.83.83.70', secret: 'S3CR3T' }) },
+  });
+  check('cancel succeeds', cancel.success === true);
+  check('cancel also invalidates the cache', !built.scriptCacheStore['avail_v1_' + today]);
+}
+
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail === 0 ? 0 : 1);

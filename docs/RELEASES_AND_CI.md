@@ -77,16 +77,48 @@ thường là do thay đổi gì đó trong code Rust (`src/`, `libs/`) làm cô
 sinh cầu nối không chạy được — báo lại kèm log lỗi để xử lý, không phải lỗi
 do bạn thao tác sai trên Sheets/app.
 
-## 3. Quy trình phát hành 1 bản LabDesk mới, đầy đủ
+## 3. Số phiên bản (version) đến từ đâu?
 
-1. Code được sửa xong, push lên `master` → CI tự chạy build.
-2. Chờ CI xong (`gh run watch <RUN_ID> -R ntthang-dev/labdesk`), tải thử về
-   máy kiểm tra (`gh run download ...`), cài và test.
-3. Ưng ý → đóng gói thành Release chính thức (lệnh `gh release create` ở
-   mục 1b).
-4. Cập nhật 2 ô trong sheet `Config`: `latest_version` (số phiên bản mới) và
-   `download_url` (link Release vừa tạo). Nếu muốn **ép buộc** mọi sinh viên
-   phải cập nhật mới được đăng nhập tiếp, đặt thêm `min_version` bằng đúng
-   số phiên bản mới.
-5. Xong — sinh viên mở app lên, lần đăng nhập kế tiếp sẽ thấy banner/bị chặn
-   theo đúng cấu hình ở bước 4, không cần bạn làm gì thêm phía client.
+**Tự động, theo chuẩn [semver](https://semver.org/) `MAJOR.MINOR.PATCH`**,
+không cần bạn tự gõ số mỗi lần build:
+
+- `MAJOR.MINOR` lấy từ file `flutter/VERSION` (vd `1.1`) — bạn chỉ sửa file
+  này bằng tay khi có thay đổi lớn/breaking, không phải mỗi lần build.
+- `PATCH` = **số commit đã có kể từ lần cuối `flutter/VERSION` được sửa** —
+  CI tự đếm bằng `git rev-list --count`, tăng dần tự nhiên theo mỗi lần code
+  thay đổi, không cần bạn làm gì.
+- Ví dụ: `flutter/VERSION` chứa `1.1`, đã có 23 commit kể từ lần sửa file đó
+  gần nhất → build ra bản `1.1.23`.
+- Muốn ép 1 số cụ thể (vd để khớp với thông báo lỗi bạn đang debug)? Điền vào
+  ô **`app_version`** khi chạy `gh workflow run` hoặc trong màn hình
+  "Run workflow" trên GitHub — override tự động luôn.
+- Push tag `vX.Y.Z` (vd `git tag v1.2.0 && git push origin v1.2.0`) → bản
+  build đó **lấy đúng số trong tag**, bỏ qua công thức đếm commit — đây là
+  cách chuẩn để đánh dấu 1 bản phát hành chính thức.
+
+## 4. Quy trình phát hành 1 bản LabDesk mới, đầy đủ (tự động)
+
+1. Code sửa xong, push lên `master`.
+2. Chạy build **kèm phát hành**:
+   ```bash
+   gh workflow run lab-client-build.yml -R ntthang-dev/labdesk -r master \
+     -f publish_release=true
+   ```
+   (hoặc trên web: tab Actions → "Build LabDesk Clients" → "Run workflow" →
+   tick ô **"Cut a GitHub Release..."**)
+3. Chờ CI xong. Khi xong, tự động — **không cần bạn làm gì thêm**:
+   - Một **GitHub Release** mới được tạo, đúng tag `vMAJOR.MINOR.PATCH`, đính
+     sẵn cả `.exe` và `.dmg` với link tải cố định.
+   - `Config!latest_version` và `Config!download_url` trong Sheets được **ghi
+     thẳng** qua action `publish_release` (`apps_script/src/26_release.gs`) —
+     sinh viên mở app lên sẽ thấy banner "Có bản mới" ngay từ lần đăng nhập
+     kế tiếp.
+4. Nếu muốn **ép buộc** mọi sinh viên phải cập nhật mới được đăng nhập tiếp
+   (vd vừa vá lỗi bảo mật) — bước duy nhất còn phải làm tay: mở Sheets, đặt
+   `Config!min_version` bằng đúng số phiên bản mới. Đây là quyết định có chủ
+   đích (khoá hết mọi sinh viên chưa cập nhật), nên **không tự động**.
+
+**Build thử, không phát hành** (như mọi lần trong quá trình phát triển): chạy
+`gh workflow run` như bình thường, **không** thêm `-f publish_release=true`
+— build vẫn chạy đầy đủ, chỉ là không tạo Release/không đụng vào `Config` của
+Sheets thật. Push tag `v*` luôn tự phát hành (không cần cờ `publish_release`).

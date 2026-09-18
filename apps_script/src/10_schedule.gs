@@ -113,10 +113,38 @@ function reservedForSomeoneElse(machineId, studentId, config) {
   return null;
 }
 
+// The booking dialog's slowest call by far (measured ~3-4s live): it reads
+// Config, all of ActiveSessions and all of Schedule, then builds a
+// slots x machines grid. All of that is identical for every student looking
+// at the same date within a few seconds of each other, so it is cached per
+// date with a short TTL - long enough to matter under concurrent load
+// (several students opening the dialog around the same time), short enough
+// that a fresh booking shows up promptly for anyone whose cache already
+// expired. handleBook/handleCancelBooking invalidate the specific date they
+// touched immediately, so "did my booking take" never has to wait out the
+// TTL for the student who just made it.
+const AVAILABILITY_CACHE_PREFIX = 'avail_v1_';
+const AVAILABILITY_CACHE_TTL_SEC = 20;
+
+function invalidateAvailabilityCache(date) {
+  CacheService.getScriptCache().remove(AVAILABILITY_CACHE_PREFIX + date);
+}
+
 function handleCheckAvailability(params) {
+  const date = params.date || dateStr(new Date());
+  const cacheKey = AVAILABILITY_CACHE_PREFIX + date;
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(cacheKey);
+  if (cached) {
+    try {
+      return jsonResponse(JSON.parse(cached));
+    } catch (e) {
+      // Corrupt cache entry: fall through to a fresh computation.
+    }
+  }
+
   const config = readConfig();
   const sc = slotConfig(config);
-  const date = params.date || dateStr(new Date());
   const slots = getSlotsForDay(config);
   const bookings = readActiveBookings().filter(b => b.date === date);
 
@@ -139,7 +167,9 @@ function handleCheckAvailability(params) {
       });
     }
   }
-  return jsonResponse({ date: date, days_ahead: sc.daysAhead, slots: grid });
+  const result = { date: date, days_ahead: sc.daysAhead, slots: grid };
+  cache.put(cacheKey, JSON.stringify(result), AVAILABILITY_CACHE_TTL_SEC);
+  return jsonResponse(result);
 }
 
 function handleMyBookings(params) {
@@ -194,6 +224,7 @@ function handleBook(body) {
   const sheet = ensureScheduleSheet();
   sheet.appendRow([date, timeSlot, machineId, studentId, fullName, 'booked', now()]);
   writeAuditLog(studentId, machineId, 'booked', fullName + ' - ' + date + ' ' + timeSlot);
+  invalidateAvailabilityCache(date);
   return jsonResponse({ success: true });
 }
 
@@ -220,6 +251,7 @@ function handleCancelBooking(body) {
         String(data[r][cols.status]).trim().toLowerCase() === 'booked') {
       sheet.getRange(r + 1, cols.status + 1).setValue('cancelled');
       writeAuditLog(studentId, machineId, 'booking_cancelled', date + ' ' + timeSlot);
+      invalidateAvailabilityCache(date);
       return jsonResponse({ success: true });
     }
   }

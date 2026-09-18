@@ -9,6 +9,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_hbb/common/widgets/overlay.dart';
 import 'package:flutter_hbb/desktop/pages/desktop_tab_page.dart';
 import 'package:flutter_hbb/desktop/pages/lab_api_service.dart';
+import 'package:flutter_hbb/desktop/pages/lab_crash_reporter.dart';
 import 'package:flutter_hbb/desktop/pages/lab_init.dart';
 import 'package:flutter_hbb/desktop/pages/login_gate_page.dart';
 import 'package:flutter_hbb/desktop/pages/install_page.dart';
@@ -41,6 +42,11 @@ late List<String> kBootArgs;
 Future<void> main(List<String> args) async {
   earlyAssert();
   WidgetsFlutterBinding.ensureInitialized();
+  // Before anything else, and unconditionally for every window this process
+  // opens (main login window or a remote-desktop sub-window - both run this
+  // same main()) - a crash in the earliest startup code is exactly the kind
+  // most useful to actually see reported.
+  LabCrashReporter.install();
 
   debugPrint("launch args: $args");
   kBootArgs = List.from(args);

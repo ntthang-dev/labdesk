@@ -23,7 +23,8 @@ void main() {
       expect(LabConfig.sharedSecret, equals('your-secret-key-here'));
     });
 
-    test('saveLocalConfig and loadLocalConfig persist and override properties', () {
+    test('saveLocalConfig and loadLocalConfig persist and override properties',
+        () {
       LabConfig.saveLocalConfig(
         apiUrl: 'https://script.google.com/macros/s/test-url/exec',
         sharedSecret: 'test-secret-123',
@@ -31,7 +32,8 @@ void main() {
         machinePassword: 'test-lab-pass',
       );
 
-      expect(LabConfig.apiUrl, equals('https://script.google.com/macros/s/test-url/exec'));
+      expect(LabConfig.apiUrl,
+          equals('https://script.google.com/macros/s/test-url/exec'));
       expect(LabConfig.sharedSecret, equals('test-secret-123'));
       expect(LabConfig.machineRustdeskId, equals('100.83.83.70'));
       expect(LabConfig.machinePassword, equals('test-lab-pass'));
@@ -104,7 +106,8 @@ void main() {
   });
 
   group('LabApiService Connection Tests', () {
-    test('testConnection fails gracefully when URL or secret is empty', () async {
+    test('testConnection fails gracefully when URL or secret is empty',
+        () async {
       final res = await LabApiService.instance.testConnection('', '');
       expect(res['success'], isFalse);
       expect(res['message'], contains('Vui lòng nhập đầy đủ'));
@@ -113,7 +116,8 @@ void main() {
     test('login returns error when not configured', () async {
       // Temporarily clear configuration
       LabConfig.saveLocalConfig(apiUrl: '', sharedSecret: '');
-      final res = await LabApiService.instance.login('20210001', 'Nguyen Van A');
+      final res =
+          await LabApiService.instance.login('20210001', 'Nguyen Van A');
       expect(res.allowed, isFalse);
       expect(res.reason, contains('Chưa cấu hình'));
     });
@@ -121,28 +125,44 @@ void main() {
 
   group('LabSessionClock Tests', () {
     // The remote desktop window is a separate isolate and reads this file to
-    // draw its countdown, so a silent regression here means a student sees no
-    // timer at all - with nothing failing anywhere else to reveal it.
-    tearDown(() => LabSessionClock.write(null));
+    // draw its countdown and identify crash reports, so a silent regression
+    // here means a student sees no timer / crashes report as "unknown" -
+    // with nothing failing anywhere else to reveal it.
+    tearDown(() => LabSessionClock.clear());
 
     test('round-trips an expiry to the second', () {
       final expires = DateTime.now().add(const Duration(minutes: 42));
-      LabSessionClock.write(expires);
+      LabSessionClock.writeSession(
+          studentId: '20210001', fullName: 'A', expiresAt: expires);
       final read = LabSessionClock.read();
       expect(read, isNotNull);
       expect(read!.difference(expires).inSeconds.abs(), lessThanOrEqualTo(1));
     });
 
-    test('write(null) clears a previous session', () {
-      LabSessionClock.write(DateTime.now().add(const Duration(minutes: 5)));
-      expect(LabSessionClock.read(), isNotNull);
-      LabSessionClock.write(null);
-      expect(LabSessionClock.read(), isNull);
+    test('also round-trips student identity', () {
+      LabSessionClock.writeSession(
+          studentId: '20210042',
+          fullName: 'Nguyen Van A',
+          expiresAt: DateTime.now().add(const Duration(minutes: 5)));
+      expect(LabSessionClock.readStudentId(), '20210042');
+      expect(LabSessionClock.readFullName(), 'Nguyen Van A');
     });
 
-    test('unlimited session (no expiry) reads back as null', () {
-      LabSessionClock.write(null);
+    test('clear() removes a previous session', () {
+      LabSessionClock.writeSession(
+          studentId: '20210001',
+          fullName: 'A',
+          expiresAt: DateTime.now().add(const Duration(minutes: 5)));
+      expect(LabSessionClock.read(), isNotNull);
+      LabSessionClock.clear();
       expect(LabSessionClock.read(), isNull);
+      expect(LabSessionClock.readStudentId(), isNull);
+    });
+
+    test('unlimited session (no expiry) still records identity', () {
+      LabSessionClock.writeSession(studentId: '20210001', fullName: 'A');
+      expect(LabSessionClock.read(), isNull);
+      expect(LabSessionClock.readStudentId(), '20210001');
     });
 
     test('a corrupt file reads as null instead of throwing', () {
@@ -151,6 +171,7 @@ void main() {
           '.';
       File('$home/.labdesk_session.json').writeAsStringSync('not json at all');
       expect(LabSessionClock.read(), isNull);
+      expect(LabSessionClock.readStudentId(), isNull);
     });
   });
 }

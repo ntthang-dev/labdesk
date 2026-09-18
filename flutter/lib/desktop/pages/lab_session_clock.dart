@@ -22,6 +22,11 @@ const Color kLabDeskAccent = Color(0xFF5E5CE6);
 /// This clock is presentational only: the session is actually ended by the
 /// server (`expires_at` in `handleStatus`), which the login window acts on.
 /// A stale file can therefore never keep a student connected past their time.
+///
+/// Also carries the logged-in student's identity, for the same cross-isolate
+/// reason: `LabCrashReporter` (running inside whichever window crashes) wants
+/// "who was this" in a crash report without threading identity through every
+/// window-opening call site RustDesk itself owns.
 class LabSessionClock {
   static File get _file {
     final home = Platform.environment['HOME'] ??
@@ -30,30 +35,48 @@ class LabSessionClock {
     return File('$home/.labdesk_session.json');
   }
 
-  static void write(DateTime? expiresAt) {
+  /// [expiresAt] is null for a lab with no configured time limit - the
+  /// countdown UI then just doesn't render, but the identity is still
+  /// recorded for crash reporting.
+  static void writeSession({
+    required String studentId,
+    required String fullName,
+    DateTime? expiresAt,
+  }) {
     try {
-      if (expiresAt == null) {
-        final f = _file;
-        if (f.existsSync()) f.deleteSync();
-        return;
-      }
-      _file.writeAsStringSync(
-          jsonEncode({'expires_at': expiresAt.toIso8601String()}));
+      _file.writeAsStringSync(jsonEncode({
+        'student_id': studentId,
+        'full_name': fullName,
+        'expires_at': expiresAt?.toIso8601String(),
+      }));
     } catch (_) {}
   }
 
-  static DateTime? read() {
+  static void clear() {
+    try {
+      final f = _file;
+      if (f.existsSync()) f.deleteSync();
+    } catch (_) {}
+  }
+
+  static Map<String, dynamic>? _readRaw() {
     try {
       final f = _file;
       if (!f.existsSync()) return null;
-      final data = jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
-      final raw = data['expires_at'];
-      if (raw is! String || raw.isEmpty) return null;
-      return DateTime.tryParse(raw);
+      return jsonDecode(f.readAsStringSync()) as Map<String, dynamic>;
     } catch (_) {
       return null;
     }
   }
+
+  static DateTime? read() {
+    final raw = _readRaw()?['expires_at'];
+    if (raw is! String || raw.isEmpty) return null;
+    return DateTime.tryParse(raw);
+  }
+
+  static String? readStudentId() => _readRaw()?['student_id'] as String?;
+  static String? readFullName() => _readRaw()?['full_name'] as String?;
 }
 
 /// Floating "time left in your session" chip for the remote desktop window.
