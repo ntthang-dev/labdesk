@@ -39,8 +39,15 @@ function generateToken() {
   return Utilities.getUuid();
 }
 
+// Human-readable local timestamp ("2026-09-18 01:02:03") for every column an
+// admin actually reads in Sheets. The old ISO form was both ugly and wrong-
+// looking to a Vietnamese admin, since it printed UTC (7 hours behind local).
+// `expires_at` deliberately stays ISO - see handleLogin - because the client
+// parses it across a machine boundary where the two timezones might differ.
 function now() {
-  return new Date().toISOString();
+  const d = new Date();
+  return d.getFullYear() + '-' + pad2(d.getMonth() + 1) + '-' + pad2(d.getDate()) +
+      ' ' + pad2(d.getHours()) + ':' + pad2(d.getMinutes()) + ':' + pad2(d.getSeconds());
 }
 
 function writeAuditLog(studentId, machineId, eventType, detail) {
@@ -148,7 +155,16 @@ function freeSessionRow(row, headers) {
 function parseTime(value) {
   if (!value) return 0;
   if (value instanceof Date) return value.getTime();
-  const t = new Date(String(value)).getTime();
+  const s = String(value).trim();
+  // "YYYY-MM-DD HH:mm:ss" from now(), parsed as local time via explicit
+  // components rather than trusting the engine's handling of the space form.
+  // Rows written before this format change are ISO and fall through to
+  // Date's own parser, so existing sheets keep working untouched.
+  const m = s.match(/^(\d{4})-(\d{2})-(\d{2})[ T](\d{2}):(\d{2}):(\d{2})$/);
+  if (m) {
+    return new Date(+m[1], +m[2] - 1, +m[3], +m[4], +m[5], +m[6]).getTime();
+  }
+  const t = new Date(s).getTime();
   return isNaN(t) ? 0 : t;
 }
 
@@ -442,6 +458,7 @@ function handleCancelBooking(body) {
 // negative/0/positive like a normal comparator. Unparseable segments count
 // as 0, so a malformed Config value fails open (never blocks login) rather
 // than throwing.
+
 function compareVersions(a, b) {
   const pa = String(a || '0').split('.').map(n => parseInt(n, 10) || 0);
   const pb = String(b || '0').split('.').map(n => parseInt(n, 10) || 0);
@@ -945,7 +962,73 @@ function onOpen() {
     .addItem('Mở khoá MSSV đang chọn', 'adminUnsuspendSelectedStudent')
     .addSeparator()
     .addItem('Xem phiên đang chạy', 'adminShowActiveSessions')
+    .addSeparator()
+    .addItem('Tạo/kiểm tra toàn bộ sheets', 'adminSetupAllSheets')
     .addToUi();
+}
+
+// Every sheet this backend ever touches, with its header row. Sheets that
+// self-create on first use (Schedule, Feedback) are listed too, so an admin
+// can have them exist up front instead of wondering why they are missing
+// before anyone has booked or sent feedback.
+const SHEET_SCHEMA = {
+  ActiveSessions: ['machine_id', 'machine_name', 'status', 'student_id', 'full_name',
+    'session_token', 'started_at', 'admin_action', 'machine_pass', 'last_seen',
+    'expires_at', 'group'],
+  Students: ['student_id', 'full_name', 'status', 'group'],
+  AuditLog: ['timestamp', 'student_id', 'machine_id', 'event_type', 'detail'],
+  Config: ['key', 'value'],
+  Queue: ['student_id', 'full_name', 'machine_id', 'requested_at'],
+  Schedule: ['date', 'time_slot', 'machine_id', 'student_id', 'full_name', 'status', 'created_at'],
+  Feedback: ['timestamp', 'student_id', 'full_name', 'message'],
+};
+
+// Creates any missing sheet and appends any missing column, without ever
+// touching existing data or reordering existing columns. Returns a report of
+// what it changed so the caller can show it.
+function setupAllSheets() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  const created = [];
+  const columnsAdded = [];
+  for (const name in SHEET_SCHEMA) {
+    let sheet = ss.getSheetByName(name);
+    if (!sheet) {
+      sheet = ss.insertSheet(name);
+      sheet.appendRow(SHEET_SCHEMA[name]);
+      created.push(name);
+      continue;
+    }
+    const lastCol = sheet.getLastColumn();
+    const headers = lastCol > 0 ? sheet.getRange(1, 1, 1, lastCol).getValues()[0] : [];
+    if (headers.length === 0) {
+      sheet.appendRow(SHEET_SCHEMA[name]);
+      created.push(name + ' (thêm dòng tiêu đề)');
+      continue;
+    }
+    SHEET_SCHEMA[name].forEach(function (col) {
+      if (headers.indexOf(col) === -1) {
+        ensureColumn(name, col);
+        columnsAdded.push(name + '.' + col);
+      }
+    });
+  }
+  return { created: created, columnsAdded: columnsAdded };
+}
+
+function adminSetupAllSheets() {
+  const report = setupAllSheets();
+  const lines = [];
+  lines.push(report.created.length
+      ? 'Đã tạo sheet: ' + report.created.join(', ')
+      : 'Không thiếu sheet nào.');
+  lines.push(report.columnsAdded.length
+      ? 'Đã thêm cột: ' + report.columnsAdded.join(', ')
+      : 'Không thiếu cột nào.');
+  lines.push('');
+  lines.push('Lưu ý: cột "group" (Students/ActiveSessions) để trống thì tính năng '
+      + 'giới hạn xem theo nhóm vẫn tắt, không ảnh hưởng gì.');
+  SpreadsheetApp.getUi().alert('LabDesk — Kiểm tra sheets', lines.join('\n'),
+      SpreadsheetApp.getUi().ButtonSet.OK);
 }
 
 // Shared by every admin menu item: which row is the admin's cursor on right

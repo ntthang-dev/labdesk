@@ -763,6 +763,53 @@ console.log('=== 24. max_bookings_per_week counts only upcoming slots ===');
   check('upcoming bookings still enforce the cap', overCap.success === false, JSON.stringify(overCap));
 }
 
+console.log('=== 25. readable local timestamps, both formats still parse ===');
+{
+  const sheets = freshSheets();
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  const stamp = sb.now();
+  check('now() is readable "YYYY-MM-DD HH:mm:ss"', /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(stamp), stamp);
+  check('now() round-trips through parseTime', Math.abs(sb.parseTime(stamp) - Date.now()) < 5000, String(sb.parseTime(stamp)));
+  const legacyIso = new Date(Date.now() - 120000).toISOString();
+  check('legacy ISO rows still parse', Math.abs(sb.parseTime(legacyIso) - (Date.now() - 120000)) < 5000, legacyIso);
+  check('empty value is 0', sb.parseTime('') === 0);
+
+  // The staleness reaper must still fire on a heartbeat written in the new
+  // format - this is the path that would silently stop reclaiming machines.
+  const staleSheets = freshSheets();
+  const staleSb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets: staleSheets }).sandbox, CODE_PATH);
+  const login = call(staleSb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: '20210001', full_name: 'A', secret: 'S3CR3T' }) },
+  });
+  const headers = staleSheets.ActiveSessions.headers;
+  const d = new Date(Date.now() - 61000);
+  const staleStamp = d.getFullYear() + '-' + staleSb.pad2(d.getMonth() + 1) + '-' + staleSb.pad2(d.getDate())
+      + ' ' + staleSb.pad2(d.getHours()) + ':' + staleSb.pad2(d.getMinutes()) + ':' + staleSb.pad2(d.getSeconds());
+  staleSheets.ActiveSessions.rows[0][headers.indexOf('last_seen')] = staleStamp;
+  const after = call(staleSb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'login', student_id: '20210002', full_name: 'B', secret: 'S3CR3T' }) },
+  });
+  check('stale session with new-format last_seen is reclaimed',
+      after.allowed === true && after.mode !== 'view', JSON.stringify(after));
+  check('reclaimed machine is the same one', after.machine_id === login.machine_id);
+}
+
+console.log('=== 26. setupAllSheets creates every sheet/column, idempotently ===');
+{
+  const sheets = { ActiveSessions: freshSheets().ActiveSessions };
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  const first = sb.setupAllSheets();
+  check('creates the missing sheets', first.created.length >= 5, JSON.stringify(first.created));
+  ['Students', 'AuditLog', 'Config', 'Queue', 'Schedule', 'Feedback'].forEach(function (name) {
+    check('  sheet ' + name + ' exists', !!sheets[name]);
+  });
+  check('adds missing columns to an existing sheet',
+      first.columnsAdded.some(c => c.indexOf('ActiveSessions.') === 0), JSON.stringify(first.columnsAdded));
+  const second = sb.setupAllSheets();
+  check('second run changes nothing (idempotent)',
+      second.created.length === 0 && second.columnsAdded.length === 0, JSON.stringify(second));
+}
+
 console.log('=== 23. action=version needs no secret (deployment self-check) ===');
 {
   const sheets = freshSheets();

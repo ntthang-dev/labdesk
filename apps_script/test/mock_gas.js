@@ -22,7 +22,13 @@ class FakeSheet {
     }
     return { getValues: () => [this.headers, ...this.rows] };
   }
-  getLastColumn() { return this.headers.length; }
+  // Row 1 of a real sheet is `headers` for a pre-populated fixture, but for an
+  // insertSheet()-created one (headers=[]) it is whatever appendRow() put in
+  // rows[0] - there is no separate "header" concept in Sheets. Everything that
+  // reads row 1 has to agree on that, or setupAllSheets()/ensureColumn() look
+  // broken here while working in production.
+  _row1() { return this.headers.length ? this.headers : (this.rows[0] || []); }
+  getLastColumn() { return this._row1().length; }
   getRange(a, b, c, d) {
     // getRange(1,1,1,lastCol) -> header row read; getRange(row,1,1,N) -> data
     // row read (row > 1); getRange(row, col) -> single cell write.
@@ -30,8 +36,9 @@ class FakeSheet {
       const self = this;
       return {
         getValues: () => {
-          if (a === 1) return [self.headers.slice(b - 1, b - 1 + d)];
-          const dataRow = self.rows[a - 2] || [];
+          if (a === 1) return [self._row1().slice(b - 1, b - 1 + d)];
+          const offset = self.headers.length ? 2 : 1;
+          const dataRow = self.rows[a - offset] || [];
           return [dataRow.slice(b - 1, b - 1 + d)];
         },
       };
@@ -41,14 +48,14 @@ class FakeSheet {
     const self = this;
     return {
       setValue(v) {
-        if (rowIdx === 0) { self.headers[colIdx] = v; return; }
-        const dataRow = rowIdx - 1;
-        while (self.rows.length <= dataRow) self.rows.push(new Array(self.headers.length).fill(''));
+        if (rowIdx === 0) { self._row1()[colIdx] = v; return; }
+        const dataRow = rowIdx - (self.headers.length ? 1 : 0);
+        while (self.rows.length <= dataRow) self.rows.push(new Array(self._row1().length).fill(''));
         self.rows[dataRow][colIdx] = v;
       },
       getValue() {
-        if (rowIdx === 0) return self.headers[colIdx];
-        return self.rows[rowIdx - 1][colIdx];
+        if (rowIdx === 0) return self._row1()[colIdx];
+        return (self.rows[rowIdx - (self.headers.length ? 1 : 0)] || [])[colIdx];
       }
     };
   }
