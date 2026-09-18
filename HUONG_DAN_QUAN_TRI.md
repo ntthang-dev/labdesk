@@ -24,6 +24,44 @@ xem `CHANGELOG.md` (kiến trúc), `apps_script/SETUP.md` (setup Sheets), và
 > (bản cũ không có action này) — quay lại làm đúng 2 bước Deploy ở trên.
 > Cách này nhanh hơn hẳn việc nhờ AI/người khác `curl` hộ bằng secret.
 
+## Sửa `Code.gs` — bây giờ sửa ở đâu?
+
+Mã nguồn backend **đã tách thành nhiều module** trong `apps_script/src/`
+(`00_core.gs`, `10_schedule.gs`, `20_misc.gs`, `30_router.gs`, `40_session.gs`,
+`50_feedback.gs`, `60_admin.gs`) cho dễ đọc và dễ sửa.
+
+`apps_script/Code.gs` **là file được sinh tự động** — vẫn là thứ bạn dán vào
+Apps Script như cũ (1 file duy nhất, không phải tạo 7 file trên trình soạn thảo
+web). Quy trình:
+
+```bash
+# sau khi sửa bất kỳ file nào trong apps_script/src/
+node apps_script/build.js       # sinh lại Code.gs
+node apps_script/test/run_test.js   # chạy 143 test
+```
+rồi mới dán `Code.gs` lên Apps Script. **Quên chạy `build.js` = bản deploy
+không có thay đổi của bạn.**
+
+## Tạo sẵn toàn bộ sheets trong 1 cú bấm
+
+Mở Sheets → menu **LabDesk** → **"Tạo/kiểm tra toàn bộ sheets"**. Nó tạo mọi
+sheet còn thiếu (kể cả `Schedule`, `Feedback`, `Queue`) và thêm mọi cột còn
+thiếu, **không đụng tới dữ liệu đang có**, bấm bao nhiêu lần cũng an toàn.
+Dùng khi mới dựng hệ thống, hoặc khi nghi ngờ thiếu sheet/cột nào đó.
+
+## Sinh viên thấy thời gian còn lại ở đâu?
+
+Hai chỗ:
+1. **Màn hình LabDesk** (cửa sổ đăng nhập): đồng hồ đếm ngược, chuyển màu cam
+   khi còn dưới 5 phút.
+2. **Trong phiên điều khiển máy** (cửa sổ remote): ô đếm ngược góc trên bên
+   phải, viền tím LabDesk, chuyển đỏ khi còn dưới 5 phút. Có cảnh báo (banner
+   + âm thanh hệ thống) ở mốc **còn 10 phút / 5 phút / 1 phút**.
+
+Đồng hồ này chỉ để sinh viên *nhìn thấy*; việc cắt phiên thật sự vẫn do server
+quyết định (`expires_at` trong `handleStatus`), nên không thể "lách" bằng cách
+sửa máy client.
+
 ## App đang nằm ở đâu trên máy tôi?
 
 `/Applications/LabDesk.app` — chỉ có **đúng 1 bản**. Nếu bạn nghi ngờ có

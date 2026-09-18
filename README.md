@@ -19,12 +19,19 @@ tự kết nối — không cần biết IP, mật khẩu, hay bất kỳ cấu 
 | Cách dựng Sheets + Apps Script từ đầu | [`apps_script/SETUP.md`](apps_script/SETUP.md) |
 | Kiểm chứng hình thức (TLA+) cho luồng cấp phiên khi nhiều sinh viên đăng nhập cùng lúc | [`apps_script/formal/README.md`](apps_script/formal/README.md) |
 | Ý nghĩa "GitHub Release" và các artifact "bridge" trong CI | [`docs/RELEASES_AND_CI.md`](docs/RELEASES_AND_CI.md) |
+| Sửa backend (mã nguồn đã tách module) | [`apps_script/src/README.md`](apps_script/src/README.md) |
 
 ### Kiểm chứng nhanh
 
 ```bash
-node apps_script/test/run_test.js                      # test logic backend, không cần tài khoản Google
+node apps_script/build.js                              # sinh Code.gs từ apps_script/src/
+node apps_script/test/run_test.js                      # 143 test backend, không cần tài khoản Google
 cd flutter && flutter test test/lab_client_test.dart    # test client Flutter
+
+# kiểm chứng hình thức (cần tla2tools.jar - xem apps_script/formal/README.md)
+cd apps_script/formal
+java -cp /tmp/tla2tools.jar tlc2.TLC -config WithLock.cfg LabSession.tla
+java -cp /tmp/tla2tools.jar tlc2.TLC -config ScheduleWithLock.cfg LabSchedule.tla
 ```
 
 ### Mã nguồn gốc: RustDesk
