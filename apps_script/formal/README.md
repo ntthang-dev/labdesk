@@ -33,6 +33,36 @@ Kết luận: khoá `LockService.getScriptLock()` trong `handleLogin`/`handleLog
 là **cần thiết** (thiếu nó thì lỗi race condition có thật) và **đủ** (có nó
 thì không còn lỗi double-booking trong toàn bộ không gian trạng thái đã kiểm).
 
+## `LabSchedule.tla` — kiểm chứng cơ chế đặt lịch
+
+Spec thứ hai, mô hình hoá phần **đặt lịch** (`handleBook` /
+`handleCancelBooking` / `reservedForSomeoneElse`) mà `LabSession.tla` không
+phủ. `handleBook` cũng là read-then-write (đọc toàn bộ lịch đang có → kiểm tra
+3 điều kiện → ghi thêm dòng), nên chịu đúng loại race như `handleLogin`.
+
+```bash
+cd apps_script/formal
+java -cp /tmp/tla2tools.jar tlc2.TLC -config ScheduleWithLock.cfg LabSchedule.tla
+java -cp /tmp/tla2tools.jar tlc2.TLC -config ScheduleWithoutLock.cfg LabSchedule.tla
+java -cp /tmp/tla2tools.jar tlc2.TLC -config ScheduleNoReservationCheck.cfg LabSchedule.tla
+```
+
+| Mô hình | Kết quả |
+|---|---|
+| `ScheduleWithLock.cfg` (đúng code hiện tại) | **Không có lỗi** — 1127 trạng thái, cả 4 tính chất an toàn đều đúng |
+| `ScheduleWithoutLock.cfg` (bỏ khoá) | **Vi phạm `NoDoubleBookedSlot`** — 2 sinh viên cùng đặt được 1 máy trong cùng khung giờ |
+| `ScheduleNoReservationCheck.cfg` (bỏ `reservedForSomeoneElse`) | **Vi phạm `NoWalkupStealsReservation`** — sinh viên vãng lai chiếm mất máy người khác đã đặt trước |
+
+4 tính chất được kiểm:
+- `NoDoubleBookedSlot` — không bao giờ 2 người cùng được báo đặt thành công 1 máy/1 khung giờ
+- `OneMachinePerStudentPerSlot` — 1 sinh viên không giữ 2 máy trong cùng khung giờ
+- `CapRespected` — không vượt `Config!max_bookings_per_week`
+- `NoWalkupStealsReservation` — đặt lịch trước thì thực sự giữ được máy
+
+Ý nghĩa của 2 cấu hình đối chứng: chúng chứng minh khoá `LockService` **và**
+lời gọi `reservedForSomeoneElse()` trong `handleLogin` đều là **cần thiết** —
+bỏ bất kỳ cái nào cũng sinh lỗi có thật, không phải code phòng thủ thừa.
+
 ## Không mô hình hoá (ngoài phạm vi)
 
 - `status()` (xử lý `kick`/hết hạn) và `logout()` chỉ chuyển `occupied → free`,

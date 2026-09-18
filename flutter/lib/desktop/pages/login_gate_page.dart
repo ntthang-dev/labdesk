@@ -6,12 +6,7 @@ import 'package:flutter_hbb/models/platform_model.dart';
 import 'package:flutter_hbb/utils/multi_window_manager.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:url_launcher/url_launcher.dart';
-
-// RustDesk's own brand color is MyTheme.accent = Color(0xFF0071FF)
-// (common.dart) - deliberately not reused here, so LabDesk's own screens
-// (this file) read as visually distinct at a glance rather than a
-// re-skinned RustDesk. Indigo, not the shared theme's blue.
-const Color kLabDeskAccent = Color(0xFF5E5CE6);
+import 'lab_session_clock.dart';
 
 typedef ConnectHandler = Future<void> Function(
   BuildContext context,
@@ -143,6 +138,9 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       _controllerName = result.controllerName;
       _controllerStudentId = result.controllerStudentId;
       _expiresAt = result.expiresAt;
+      // The remote desktop runs in its own window/isolate and reads this file
+      // to render its own countdown - see LabSessionClock.
+      LabSessionClock.write(result.expiresAt);
       _startCountdown();
 
       // `view-only` is a per-peer setting RustDesk itself enforces (blocks
@@ -252,6 +250,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
           _controllerName = null;
           _controllerStudentId = null;
           _expiresAt = null;
+          LabSessionClock.write(null);
           _countdownTimer?.cancel();
           _timeRemaining = null;
         });
@@ -274,6 +273,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       _controllerName = null;
       _controllerStudentId = null;
       _expiresAt = null;
+      LabSessionClock.write(null);
       _countdownTimer?.cancel();
       _timeRemaining = null;
 
@@ -299,6 +299,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
       _controllerName = null;
       _controllerStudentId = null;
       _expiresAt = null;
+      LabSessionClock.write(null);
       _countdownTimer?.cancel();
       _timeRemaining = null;
       if (widget.connectHandler == null) {
@@ -336,6 +337,7 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
         _controllerName = null;
         _controllerStudentId = null;
         _expiresAt = null;
+        LabSessionClock.write(null);
         _countdownTimer?.cancel();
         _timeRemaining = null;
         _isLoading = false;

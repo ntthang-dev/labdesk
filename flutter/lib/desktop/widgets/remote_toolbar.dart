@@ -9,6 +9,8 @@ import 'package:flutter_hbb/common/widgets/toolbar.dart';
 import 'package:flutter_hbb/models/chat_model.dart';
 import 'package:flutter_hbb/models/state_model.dart';
 import 'package:flutter_hbb/consts.dart';
+import 'package:flutter_hbb/desktop/pages/lab_api_service.dart';
+import 'package:flutter_hbb/desktop/pages/lab_session_clock.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:get/get.dart';
 import 'package:provider/provider.dart';
@@ -324,8 +326,13 @@ class ToolbarState {
 }
 
 class _ToolbarTheme {
-  static const Color blueColor = MyTheme.button;
-  static const Color hoverBlueColor = MyTheme.accent;
+  // Lab mode repaints the toolbar's active colour so a student in a remote
+  // session sees LabDesk's indigo, not RustDesk's blue. Plain RustDesk keeps
+  // its own theme untouched.
+  static Color get blueColor =>
+      LabConfig.isLabMode ? kLabDeskAccent : MyTheme.button;
+  static Color get hoverBlueColor =>
+      LabConfig.isLabMode ? kLabDeskAccent : MyTheme.accent;
   static Color inactiveColor = Colors.grey[800]!;
   static Color hoverInactiveColor = Colors.grey[850]!;
 
@@ -3535,8 +3542,10 @@ class _DraggableShowHideState extends State<_DraggableShowHide> {
     final isFullscreen = stateGlobal.fullscreen;
     const double iconSize = 20;
 
-    buttonWrapper(VoidCallback? onPressed, Widget child,
-        {Color hoverColor = _ToolbarTheme.blueColor}) {
+    // _ToolbarTheme.blueColor is theme-dependent (lab mode repaints it), so it
+    // can no longer be a const default - resolve it per call instead.
+    buttonWrapper(VoidCallback? onPressed, Widget child, {Color? hoverColor}) {
+      final effectiveHoverColor = hoverColor ?? _ToolbarTheme.blueColor;
       final bgColor = buttonStyle.backgroundColor?.resolve({});
       return TextButton(
         onPressed: onPressed,
@@ -3544,7 +3553,7 @@ class _DraggableShowHideState extends State<_DraggableShowHide> {
         style: buttonStyle.copyWith(
           backgroundColor: MaterialStateProperty.resolveWith((states) {
             if (states.contains(MaterialState.hovered)) {
-              return (bgColor ?? hoverColor).withOpacity(0.15);
+              return (bgColor ?? effectiveHoverColor).withOpacity(0.15);
             }
             return bgColor;
           }),

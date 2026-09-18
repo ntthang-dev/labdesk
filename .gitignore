@@ -61,3 +61,6 @@ flutter/web/
 
 # LabDesk: Apps Script deployment identifiers, not for git
 apps_script/api.md
+
+# TLC model-checker scratch output
+apps_script/formal/states/

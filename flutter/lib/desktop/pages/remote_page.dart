@@ -22,6 +22,8 @@ import '../../utils/image.dart';
 import '../widgets/remote_toolbar.dart';
 import '../widgets/kb_layout_type_chooser.dart';
 import '../widgets/tabbar_widget.dart';
+import 'lab_api_service.dart';
+import 'lab_session_clock.dart';
 import 'macos_full_screen_focus_recovery.dart';
 
 import 'package:flutter_hbb/native/custom_cursor.dart'
@@ -822,13 +824,20 @@ class _RemotePageState extends State<RemotePage>
           clientClose(sessionId, _ffi);
           return false;
         },
-        child: MultiProvider(providers: [
-          ChangeNotifierProvider.value(value: _ffi.ffiModel),
-          ChangeNotifierProvider.value(value: _ffi.imageModel),
-          ChangeNotifierProvider.value(value: _ffi.cursorModel),
-          ChangeNotifierProvider.value(value: _ffi.canvasModel),
-          ChangeNotifierProvider.value(value: _ffi.recordingModel),
-        ], child: buildBody(context)));
+        child: MultiProvider(
+            providers: [
+              ChangeNotifierProvider.value(value: _ffi.ffiModel),
+              ChangeNotifierProvider.value(value: _ffi.imageModel),
+              ChangeNotifierProvider.value(value: _ffi.cursorModel),
+              ChangeNotifierProvider.value(value: _ffi.canvasModel),
+              ChangeNotifierProvider.value(value: _ffi.recordingModel),
+            ],
+            child: LabConfig.isLabMode
+                ? Stack(children: [
+                    buildBody(context),
+                    const LabSessionCountdown(),
+                  ])
+                : buildBody(context)));
   }
 
   void enterView(PointerEnterEvent evt) {
