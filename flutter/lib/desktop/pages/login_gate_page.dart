@@ -773,10 +773,12 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
         builder: (ctx, setDialogState) {
           Future<void> load() async {
             setDialogState(() => loading = true);
-            final availability = await LabApiService.instance
+            final availabilityFuture = LabApiService.instance
                 .checkAvailability(_isoDate(selectedDate));
-            final myBookingsResult =
-                await LabApiService.instance.myBookings(studentId);
+            final myBookingsFuture =
+                LabApiService.instance.myBookings(studentId);
+            final availability = await availabilityFuture;
+            final myBookingsResult = await myBookingsFuture;
             if (!ctx.mounted) return;
             setDialogState(() {
               slots = availability.slots;
@@ -867,8 +869,11 @@ class _LoginGatePageState extends State<LoginGatePage> with WindowListener {
                                 child: Padding(
                                   padding: const EdgeInsets.all(12),
                                   child: Text(
+                                    // A working backend always generates
+                                    // slots from Config, so an empty grid
+                                    // means ActiveSessions lists no machine.
                                     slotsError ??
-                                        'Không có khung giờ nào cho ngày này.',
+                                        'Chưa có máy nào được đăng ký trong hệ thống. Vui lòng liên hệ Quản trị viên.',
                                     textAlign: TextAlign.center,
                                     style: TextStyle(
                                         fontSize: 12,

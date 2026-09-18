@@ -470,17 +470,17 @@ class LabApiService {
       final response = await _sendWithRedirect(uri,
           method: 'GET', timeout: const Duration(seconds: 12));
       if (response.statusCode != 200) {
-        // Most common cause: the deployed Code.gs predates the booking
-        // feature (stale deployment) and returns {"error":"unknown action"}
-        // with a non-200 status - surface that instead of guessing.
-        String reason = 'Máy chủ phản hồi lỗi (mã ${response.statusCode}).';
-        try {
-          final data = jsonDecode(response.body) as Map<String, dynamic>;
-          if (data['error'] != null) reason = 'Lỗi máy chủ: ${data['error']}';
-        } catch (_) {}
-        return AvailabilityResult([], error: reason);
+        return AvailabilityResult([],
+            error: 'Máy chủ phản hồi lỗi (mã ${response.statusCode}).');
       }
       final data = jsonDecode(response.body) as Map<String, dynamic>;
+      // Apps Script's jsonResponse() ignores its status-code argument, so
+      // every backend error - including a stale deployment answering
+      // {"error":"unknown action"} - arrives as HTTP 200 with an `error`
+      // key. Checking the status alone would miss all of them.
+      if (data['error'] != null) {
+        return AvailabilityResult([], error: 'Lỗi máy chủ: ${data['error']}');
+      }
       final slots = data['slots'] as List<dynamic>? ?? [];
       return AvailabilityResult(slots
           .map((s) => TimeSlot.fromJson(s as Map<String, dynamic>))

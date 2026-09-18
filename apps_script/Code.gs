@@ -392,9 +392,15 @@ function handleBook(body) {
   if (existing.some(b => b.date === date && b.time_slot === timeSlot && b.student_id === studentId)) {
     return jsonResponse({ success: false, reason: 'Bạn đã đặt một máy khác trong khung giờ này rồi.' });
   }
+  // Only slots that haven't happened yet count against the cap - nothing
+  // ever flips an elapsed booking's status, so counting every row a student
+  // has ever booked would lock them out permanently once they first hit the
+  // cap. handleMyBookings() applies the same `>= today` filter.
   const maxPerWeek = parseInt(config.max_bookings_per_week, 10);
-  if (maxPerWeek > 0 && existing.filter(b => b.student_id === studentId).length >= maxPerWeek) {
-    return jsonResponse({ success: false, reason: 'Bạn đã đặt tối đa ' + maxPerWeek + ' lượt trong tuần này.' });
+  const upcomingForStudent = existing.filter(
+      b => b.student_id === studentId && b.date >= today);
+  if (maxPerWeek > 0 && upcomingForStudent.length >= maxPerWeek) {
+    return jsonResponse({ success: false, reason: 'Bạn đang giữ tối đa ' + maxPerWeek + ' lượt đặt sắp tới. Huỷ bớt một lượt để đặt lượt mới.' });
   }
 
   const sheet = ensureScheduleSheet();

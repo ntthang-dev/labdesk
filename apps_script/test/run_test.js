@@ -730,6 +730,39 @@ console.log('  -- 22c. no group column at all -> everyone can view, exactly as b
   check('anyone can view when groups are not configured', res.allowed === true && res.mode === 'view', JSON.stringify(res));
 }
 
+console.log('=== 24. max_bookings_per_week counts only upcoming slots ===');
+{
+  const sheets = freshSheets();
+  sheets.Config = new FakeSheet(['key', 'value'], [
+    ['slot_start_hour', '7'], ['slot_end_hour', '19'], ['slot_duration_minutes', '120'],
+    ['max_bookings_per_week', '2'],
+  ]);
+  const probeSb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets: {} }).sandbox, CODE_PATH);
+  const today = probeSb.dateStr(new Date());
+  // Two bookings the student already used up, both safely in the past.
+  sheets.Schedule = new FakeSheet(
+    ['date', 'time_slot', 'machine_id', 'student_id', 'full_name', 'status', 'created_at'],
+    [
+      ['2020-01-01', '07:00-09:00', '100.83.83.70', 's1', 'A', 'booked', ''],
+      ['2020-01-02', '07:00-09:00', '100.83.83.70', 's1', 'A', 'booked', ''],
+    ]
+  );
+  const sb = loadCode(buildSandbox({ sharedSecret: 'S3CR3T', sheets }).sandbox, CODE_PATH);
+  const afterElapsed = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'book', student_id: 's1', full_name: 'A', date: today, time_slot: '09:00-11:00', machine_id: '100.83.83.70', secret: 'S3CR3T' }) },
+  });
+  check('elapsed bookings do not count against the cap', afterElapsed.success === true, JSON.stringify(afterElapsed));
+
+  // One more upcoming booking reaches the cap of 2 (this one + the one above).
+  call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'book', student_id: 's1', full_name: 'A', date: today, time_slot: '11:00-13:00', machine_id: '100.83.83.70', secret: 'S3CR3T' }) },
+  });
+  const overCap = call(sb, 'doPost', {
+    postData: { contents: JSON.stringify({ action: 'book', student_id: 's1', full_name: 'A', date: today, time_slot: '13:00-15:00', machine_id: '100.83.83.70', secret: 'S3CR3T' }) },
+  });
+  check('upcoming bookings still enforce the cap', overCap.success === false, JSON.stringify(overCap));
+}
+
 console.log('=== 23. action=version needs no secret (deployment self-check) ===');
 {
   const sheets = freshSheets();
