@@ -22,8 +22,9 @@ const SHARED_SECRET = PROPS.getProperty('SHARED_SECRET') || 'change-me';
 // first. Only ever returns this static string + a feature list, never any
 // sheet data, so it deliberately skips the secret check that guards every
 // other action.
-const CODE_VERSION = '2026-09-18-schedule-feedback-group';
-const CODE_FEATURES = ['view_only_queue', 'expires_at_countdown', 'group_restricted_view', 'schedule_booking', 'feedback', 'version_gate'];
+const CODE_VERSION = '2026-09-18-modular-readable-timestamps';
+const CODE_FEATURES = ['view_only_queue', 'expires_at_countdown', 'group_restricted_view',
+  'schedule_booking', 'feedback', 'version_gate', 'readable_timestamps', 'setup_all_sheets'];
 
 // A client polls `status` every ~12s. If nothing has been heard for this long the
 // student's machine died or the app was force-quit, so the slot is reclaimed.

@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_hbb/desktop/pages/lab_api_service.dart';
+import 'package:flutter_hbb/desktop/pages/lab_session_clock.dart';
 
 void main() {
   // saveLocalConfig writes to the real ~/.labdesk_config.json; leaving test
@@ -115,6 +116,41 @@ void main() {
       final res = await LabApiService.instance.login('20210001', 'Nguyen Van A');
       expect(res.allowed, isFalse);
       expect(res.reason, contains('Chưa cấu hình'));
+    });
+  });
+
+  group('LabSessionClock Tests', () {
+    // The remote desktop window is a separate isolate and reads this file to
+    // draw its countdown, so a silent regression here means a student sees no
+    // timer at all - with nothing failing anywhere else to reveal it.
+    tearDown(() => LabSessionClock.write(null));
+
+    test('round-trips an expiry to the second', () {
+      final expires = DateTime.now().add(const Duration(minutes: 42));
+      LabSessionClock.write(expires);
+      final read = LabSessionClock.read();
+      expect(read, isNotNull);
+      expect(read!.difference(expires).inSeconds.abs(), lessThanOrEqualTo(1));
+    });
+
+    test('write(null) clears a previous session', () {
+      LabSessionClock.write(DateTime.now().add(const Duration(minutes: 5)));
+      expect(LabSessionClock.read(), isNotNull);
+      LabSessionClock.write(null);
+      expect(LabSessionClock.read(), isNull);
+    });
+
+    test('unlimited session (no expiry) reads back as null', () {
+      LabSessionClock.write(null);
+      expect(LabSessionClock.read(), isNull);
+    });
+
+    test('a corrupt file reads as null instead of throwing', () {
+      final home = Platform.environment['HOME'] ??
+          Platform.environment['USERPROFILE'] ??
+          '.';
+      File('$home/.labdesk_session.json').writeAsStringSync('not json at all');
+      expect(LabSessionClock.read(), isNull);
     });
   });
 }
